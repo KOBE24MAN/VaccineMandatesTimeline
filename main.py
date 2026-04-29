@@ -62,12 +62,14 @@ class MandateSummary(BaseModel):
     jurisdiction: str
     name: Optional[str] = None
     type: Optional[str] = None
+    target: Optional[str] = None
     target_category: Optional[str] = None
     effective_date: Optional[str] = None
     enforcement_date: Optional[str] = None
     removal_date: Optional[str] = None
     duration_days: Optional[int] = None
     date_uncertain: bool = False
+    visibility_level: Optional[int] = None
 
 
 class MandateDetail(BaseModel):
@@ -213,9 +215,9 @@ def list_mandates(
     where = " AND ".join(conditions) if conditions else "1=1"
 
     query = f"""
-        SELECT m.id, m.jurisdiction, m.name, m.type, m.target_category,
+        SELECT m.id, m.jurisdiction, m.name, m.type, m.target, m.target_category,
                m.effective_date, m.enforcement_date, m.removal_date,
-               m.duration_days, m.date_uncertain
+               m.duration_days, m.date_uncertain, m.visibility_level
         FROM mandates m
         WHERE {where}
         ORDER BY m.effective_date ASC, m.jurisdiction ASC
