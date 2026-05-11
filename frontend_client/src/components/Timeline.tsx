@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useMemo } from "react";
 import * as d3 from "d3";
 import type { EventIndex, Region, EventType } from "../types/event";
 import { ALL_REGIONS } from "../types/event";
@@ -68,9 +68,11 @@ function assignLanes(events: EventIndex[]): Map<string, number> {
 
   for (const ev of sorted) {
     const start = parseDate(ev.start_date!).getTime();
-    const end   = ev.end_date
-      ? parseDate(ev.end_date).getTime()
-      : start + 14 * 24 * 60 * 60 * 1000;
+    const end   = (ev as EventIndex).ongoing
+      ? Number.MAX_SAFE_INTEGER
+      : ev.end_date
+        ? parseDate(ev.end_date).getTime()
+        : start + 14 * 24 * 60 * 60 * 1000;
 
     // Find first lane where the previous event has already ended
     let lane = laneEnds.findIndex(t => t <= start);
@@ -89,13 +91,15 @@ interface Props {
   activeRegions: Set<Region>;
   activeTypes: Set<EventType>;
   onEventClick: (id: string) => void;
+  onEventDoubleClick?: (id: string) => void;
   onGroupClick: (ids: string[]) => void;
   windowStart: Date;
   windowEnd: Date;
   onWidthChange?: (width: number) => void;
+  showOngoingTail?: boolean;
 }
 
-export function Timeline({ events, activeRegions, activeTypes, onEventClick, onGroupClick, windowStart, windowEnd, onWidthChange }: Props) {
+export function Timeline({ events, activeRegions, activeTypes, onEventClick, onEventDoubleClick, onGroupClick, windowStart, windowEnd, onWidthChange, showOngoingTail = true }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef       = useRef<SVGSVGElement>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
@@ -103,6 +107,9 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onG
 
   const onClickRef = useRef(onEventClick);
   useEffect(() => { onClickRef.current = onEventClick; }, [onEventClick]);
+
+  const onDblClickRef = useRef(onEventDoubleClick);
+  useEffect(() => { onDblClickRef.current = onEventDoubleClick; }, [onEventDoubleClick]);
 
   const onGroupClickRef = useRef(onGroupClick);
   useEffect(() => { onGroupClickRef.current = onGroupClick; }, [onGroupClick]);
@@ -112,7 +119,8 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onG
 
   // Track previous filter/data state to detect window-only changes (panning),
   // which should not trigger the enter animation.
-  const prevFilterKey = useRef<string>("");
+  const prevEventIdsRef = useRef<Set<string>>(new Set());
+  const prevBarDimsRef = useRef<Map<string, { barY: number; barH: number }>>(new Map());
 
   useEffect(() => {
     const el = containerRef.current;
@@ -130,13 +138,34 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onG
   const windowYears = yearsBetween(windowStart, windowEnd);
   const isDetail    = windowYears < 0.5;
 
+  // Memoize the layout computation so it only reruns when events/regions change,
+  // not on every window pan/zoom.
+  const layout = useMemo(() => {
+    const visibleRegions = ALL_REGIONS.filter(r => activeRegions.has(r));
+    const dedupedEvents = deduplicateEvents(events);
+    const byRegion = new Map<Region, DeduplicatedEvent[]>();
+    visibleRegions.forEach(r => byRegion.set(r, []));
+    dedupedEvents.forEach(e => { byRegion.get(e.region as Region)?.push(e); });
+
+    const lanesPerRegion = new Map<Region, Map<string, number>>();
+    const laneCountPerRegion = new Map<Region, number>();
+    visibleRegions.forEach(region => {
+      const rowEvents = byRegion.get(region) ?? [];
+      const lanes = assignLanes(rowEvents);
+      lanesPerRegion.set(region, lanes);
+      const maxLane = lanes.size > 0 ? Math.max(0, ...lanes.values()) : 0;
+      laneCountPerRegion.set(region, Math.max(maxLane + 1, 1));
+    });
+
+    return { visibleRegions, dedupedEvents, byRegion, lanesPerRegion, laneCountPerRegion };
+  }, [events, activeRegions]);
+
   useEffect(() => {
     const svgEl = svgRef.current;
     if (!svgEl) return;
 
-    const filterKey = `${[...activeRegions].sort().join(",")}|${[...activeTypes].sort().join(",")}|${events.length}`;
-    const shouldAnimate = filterKey !== prevFilterKey.current;
-    prevFilterKey.current = filterKey;
+    const oldBarDims = new Map(prevBarDimsRef.current);
+    prevBarDimsRef.current = new Map();
 
     const svg = d3.select(svgEl);
     svg.selectAll("*").remove();
@@ -150,25 +179,7 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onG
       .domain([windowStart, windowEnd])
       .range([MARGIN.left, MARGIN.left + innerW]);
 
-    // ── Deduplicate then group by region ─────────────────────────────────────
-    const visibleRegions = ALL_REGIONS.filter(r => activeRegions.has(r));
-    const dedupedEvents = deduplicateEvents(events);
-    const byRegion = new Map<Region, DeduplicatedEvent[]>();
-    visibleRegions.forEach(r => byRegion.set(r, []));
-    dedupedEvents.forEach(e => { byRegion.get(e.region as Region)?.push(e); });
-
-    // ── Calculate lane counts per region ─────────────────────────────────────
-    // (needed before drawing so we can size rows proportionally)
-    const lanesPerRegion = new Map<Region, Map<string, number>>();
-    const laneCountPerRegion = new Map<Region, number>();
-
-    visibleRegions.forEach(region => {
-      const rowEvents = byRegion.get(region) ?? [];
-      const lanes = assignLanes(rowEvents);
-      lanesPerRegion.set(region, lanes);
-      const maxLane = lanes.size > 0 ? Math.max(0, ...lanes.values()) : 0;
-      laneCountPerRegion.set(region, Math.max(maxLane + 1, 1));
-    });
+    const { visibleRegions, dedupedEvents, byRegion, lanesPerRegion, laneCountPerRegion } = layout;
 
     // Each region row gets height proportional to its lane count so bars
     // fill the available space equally regardless of how many lanes there are.
@@ -183,6 +194,9 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onG
       cursor += rowH;
       return { region, rowH, laneH, barH, y, laneCount };
     });
+
+    // Track which event IDs are visible this render (for grow-in animation)
+    const currentEventIds = new Set(layout.dedupedEvents.map(e => e.id));
 
     // ── Defs: stripe patterns (one per region colour) ─────────────────────────
     const defs = svg.append("defs");
@@ -199,6 +213,18 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onG
         .attr("x1", 0).attr("y1", 0).attr("x2", 0).attr("y2", 8)
         .attr("stroke", col).attr("stroke-width", 3).attr("stroke-opacity", 0.6);
     });
+
+    // ── Ongoing tail gradient (fade to white at right viewport edge) ──────────
+    const tailGradId = "ongoing-tail";
+    const tailGrad = defs.append("linearGradient")
+      .attr("id", tailGradId)
+      .attr("gradientUnits", "userSpaceOnUse")
+      .attr("x1", MARGIN.left + innerW - 64)
+      .attr("y1", 0)
+      .attr("x2", MARGIN.left + innerW)
+      .attr("y2", 0);
+    tailGrad.append("stop").attr("offset", "0%").attr("stop-color", "white").attr("stop-opacity", 0);
+    tailGrad.append("stop").attr("offset", "100%").attr("stop-color", "white").attr("stop-opacity", 0.82);
 
     // ── X axis ────────────────────────────────────────────────────────────────
     svg.append("g")
@@ -250,10 +276,12 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onG
             : new Date(startD.getTime() + 14 * 24 * 60 * 60 * 1000);
 
           const x1 = xScale(startD);
-          const x2 = xScale(endD);
+          // Ongoing mandates extend to the right edge of the viewport
+          const x2raw = xScale(endD);
+          const x2 = ev.ongoing ? MARGIN.left + innerW : x2raw;
           const w  = Math.max(x2 - x1, 3);
 
-          if (x2 < MARGIN.left || x1 > MARGIN.left + innerW) return;
+          if ((ev.ongoing ? MARGIN.left + innerW : x2raw) < MARGIN.left || x1 > MARGIN.left + innerW) return;
 
           const lane  = lanes.get(ev.id) ?? 0;
           const barY  = y + rowH - (lane + 1) * laneH + LANE_GAP / 2;
@@ -261,42 +289,63 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onG
           const barColor = eventColor(region, ev.type);
           const outlineColor = REGION_COLOR[region];
 
-          // Unique clip path per bar
+          const isNew = prevEventIdsRef.current.size > 0
+            && !prevEventIdsRef.current.has(ev.id);
+
+          const prevDims = oldBarDims.get(ev.id);
+          const isResizing = !isNew && !!prevDims
+            && (prevDims.barY !== barY || prevDims.barH !== barH);
+
+          const dur  = 380;
+          const ease = d3.easeCubicOut;
+          const midY = barY + barH / 2;
+
+          prevBarDimsRef.current.set(ev.id, { barY, barH });
+
+          // ── Clip path ──────────────────────────────────────────────────────
+          // Controls the visible pill area; animates for grow (new) and resize.
+          // For ongoing bars extend the clip past the right edge so the rounded
+          // corner is outside the viewport → flat right end appearance.
           const clipId = `clip-${ev.id.replace(/\W/g, "_")}`;
-          defs.append("clipPath").attr("id", clipId)
-            .append("rect")
-              .attr("x", x1).attr("y", barY)
-              .attr("width", w).attr("height", barH)
-              .attr("rx", rx);
+          const clipRect = defs.append("clipPath").attr("id", clipId)
+            .append("rect").attr("x", x1).attr("width", ev.ongoing ? w + rx : w).attr("rx", rx);
 
-          const g = svg.append("g")
-            .attr("clip-path", `url(#${clipId})`)
-            .attr("opacity", shouldAnimate ? 0 : 1);
-
-          if (shouldAnimate) {
-            g.transition().duration(300).ease(d3.easeCubicOut).attr("opacity", 1);
+          if (isNew) {
+            clipRect.attr("y", midY).attr("height", 0)
+              .transition().duration(dur).ease(ease)
+              .attr("y", barY).attr("height", barH);
+          } else if (isResizing && prevDims) {
+            clipRect.attr("y", prevDims.barY).attr("height", prevDims.barH)
+              .transition().duration(dur).ease(ease)
+              .attr("y", barY).attr("height", barH);
+          } else {
+            clipRect.attr("y", barY).attr("height", barH);
           }
 
-          // White base (so stripe pattern has a clean background)
+          // ── Fill group ─────────────────────────────────────────────────────
+          const g = svg.append("g")
+            .attr("clip-path", `url(#${clipId})`)
+            .attr("opacity", isNew ? 0 : 1);
+
+          if (isNew) g.transition().duration(dur).ease(ease).attr("opacity", 1);
+
+          // Draw all fill rects at NEW dimensions
           g.append("rect")
             .attr("x", x1).attr("y", barY)
             .attr("width", w).attr("height", barH)
             .attr("fill", "white");
 
-          // Solid fill for the whole bar (the main-period colour)
           g.append("rect")
             .attr("x", x1).attr("y", barY)
             .attr("width", w).attr("height", barH)
             .attr("fill", barColor).attr("fill-opacity", 0.85);
 
-          // Striped lead segment: start_date → enforcement_date
           if (ev.enforcement_date) {
             const enfD = parseDate(ev.enforcement_date);
             if (enfD.getTime() > startD.getTime()) {
               const xe = xScale(enfD);
               const leadW = xe - x1;
               if (leadW > 0) {
-                // Overlay stripe pattern on the lead segment only
                 g.append("rect")
                   .attr("x", x1).attr("y", barY)
                   .attr("width", leadW).attr("height", barH)
@@ -305,24 +354,71 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onG
             }
           }
 
-          // Pill outline
+          // ── Ongoing tail fade overlay ───────────────────────────────────────
+          if (ev.ongoing && showOngoingTail) {
+            const tailX = Math.max(x1, MARGIN.left + innerW - 64);
+            g.append("rect")
+              .attr("x", tailX).attr("y", barY)
+              .attr("width", MARGIN.left + innerW - tailX).attr("height", barH)
+              .attr("fill", `url(#${tailGradId})`).attr("pointer-events", "none");
+          }
+
+          // Slide all fill rects from old position to new so they move with the clip
+          if (isResizing && prevDims) {
+            g.selectAll("rect")
+              .attr("y", prevDims.barY)
+              .attr("height", prevDims.barH)
+              .transition().duration(dur).ease(ease)
+              .attr("y", barY)
+              .attr("height", barH);
+          }
+
+          // ── Outline ────────────────────────────────────────────────────────
+          // Ongoing bars extend past the viewport so the right rounded corner is
+          // not visible → flat right end. Extend outline width similarly.
           const outline = svg.append("rect")
-            .attr("x", x1).attr("y", barY)
-            .attr("width", w).attr("height", barH)
-            .attr("rx", rx)
+            .attr("x", x1).attr("width", ev.ongoing ? w + rx : w).attr("rx", rx)
             .attr("fill", "none")
             .attr("stroke", outlineColor)
-            .attr("stroke-width", 1)
+            .attr("stroke-width", ev.date_uncertain ? 1.5 : 1)
             .attr("stroke-opacity", 0.5)
+            .attr("stroke-dasharray", ev.date_uncertain ? "4,3" : null)
             .attr("pointer-events", "none");
 
-          // Transparent hit rect (full pill area, receives all mouse events)
+          if (isNew) {
+            outline.attr("y", midY).attr("height", 0)
+              .transition().duration(dur).ease(ease)
+              .attr("y", barY).attr("height", barH);
+          } else if (isResizing && prevDims) {
+            outline.attr("y", prevDims.barY).attr("height", prevDims.barH)
+              .transition().duration(dur).ease(ease)
+              .attr("y", barY).attr("height", barH);
+          } else {
+            outline.attr("y", barY).attr("height", barH);
+          }
+
+          // ── Ongoing chevron marker ─────────────────────────────────────────
+          if (ev.ongoing && showOngoingTail && barH >= 8) {
+            const cx  = MARGIN.left + innerW - 5;
+            const cy  = barY + barH / 2;
+            const ch  = Math.min(barH * 0.38, 7);
+            const cw  = Math.min(4, barH * 0.28);
+            svg.append("path")
+              .attr("d", `M${cx - cw},${cy - ch} L${cx},${cy} L${cx - cw},${cy + ch}`)
+              .attr("fill", "none")
+              .attr("stroke", outlineColor)
+              .attr("stroke-width", 1.5)
+              .attr("stroke-linecap", "round")
+              .attr("stroke-linejoin", "round")
+              .attr("opacity", 0.75)
+              .attr("pointer-events", "none");
+          }
+
+          // ── Hit rect ───────────────────────────────────────────────────────
           svg.append("rect")
             .attr("x", x1).attr("y", barY)
             .attr("width", w).attr("height", barH)
-            .attr("rx", rx)
-            .attr("fill", "transparent")
-            .attr("cursor", "pointer")
+            .attr("rx", rx).attr("fill", "transparent").attr("cursor", "pointer")
             .on("mouseenter", (e: MouseEvent) => {
               g.attr("opacity", 1);
               outline.attr("stroke-width", 2).attr("stroke-opacity", 1);
@@ -344,43 +440,61 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onG
               } else {
                 onClickRef.current(ev.id);
               }
+            })
+            .on("dblclick", (e: MouseEvent) => {
+              e.stopPropagation();
+              if (onDblClickRef.current) {
+                const id = ev.mergedIds ? ev.mergedIds[0] : ev.id;
+                onDblClickRef.current(id);
+              }
             });
 
-          // Count badge for merged bars
+          // ── Badge ──────────────────────────────────────────────────────────
           if (ev.mergedIds && ev.mergedIds.length > 1 && w > 20) {
-            const badgeW = 16;
-            const badgeH = 11;
-            const badgeX = Math.min(x1 + w - badgeW - 3, MARGIN.left + innerW - badgeW - 3);
-            const badgeY = barY + 3;
-            svg.append("rect")
-              .attr("x", badgeX).attr("y", badgeY)
-              .attr("width", badgeW).attr("height", badgeH)
-              .attr("rx", 3)
-              .attr("fill", "#1F2937")
-              .attr("pointer-events", "none");
-            svg.append("text")
-              .attr("x", badgeX + badgeW / 2).attr("y", badgeY + badgeH / 2)
-              .attr("text-anchor", "middle")
-              .attr("dominant-baseline", "middle")
-              .attr("fill", "#fff")
-              .attr("font-size", "8px")
-              .attr("font-weight", "700")
-              .attr("pointer-events", "none")
-              .text(`×${ev.mergedIds.length}`);
+            const badgeW  = 16;
+            const badgeH  = 11;
+            const badgeX  = Math.min(x1 + w - badgeW - 3, MARGIN.left + innerW - badgeW - 3);
+            const newBadgeY = barY + 3;
+            const oldBadgeY = prevDims ? prevDims.barY + 3 : newBadgeY;
+
+            const badgeRect = svg.append("rect")
+              .attr("x", badgeX).attr("width", badgeW).attr("height", badgeH)
+              .attr("rx", 3).attr("fill", "#1F2937").attr("pointer-events", "none");
+            const badgeTxt = svg.append("text")
+              .attr("x", badgeX + badgeW / 2)
+              .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
+              .attr("fill", "#fff").attr("font-size", "8px").attr("font-weight", "700")
+              .attr("pointer-events", "none").text(`×${ev.mergedIds.length}`);
+
+            if (isNew) {
+              badgeRect.attr("y", newBadgeY).attr("opacity", 0)
+                .transition().duration(dur).attr("opacity", 1);
+              badgeTxt.attr("y", newBadgeY + badgeH / 2).attr("opacity", 0)
+                .transition().duration(dur).attr("opacity", 1);
+            } else if (isResizing) {
+              badgeRect.attr("y", oldBadgeY)
+                .transition().duration(dur).ease(ease).attr("y", newBadgeY);
+              badgeTxt.attr("y", oldBadgeY + badgeH / 2)
+                .transition().duration(dur).ease(ease).attr("y", newBadgeY + badgeH / 2);
+            } else {
+              badgeRect.attr("y", newBadgeY);
+              badgeTxt.attr("y", newBadgeY + badgeH / 2);
+            }
           }
 
-          // Label when bar is tall and wide enough to hold text
+          // ── Label ──────────────────────────────────────────────────────────
           const visibleX1 = Math.max(x1, MARGIN.left);
           const visibleX2 = Math.min(x2, MARGIN.left + innerW);
           const visibleW  = visibleX2 - visibleX1;
           const fontSize  = Math.min(Math.floor(barH * 0.6), 12);
           if (barH >= 14 && visibleW > 50) {
+            const newLabelY = barY + barH / 2;
+            const oldLabelY = prevDims ? prevDims.barY + prevDims.barH / 2 : newLabelY;
+
             const txt = svg.append("text")
               .attr("x", visibleX1 + rx + 4)
-              .attr("y", barY + barH / 2)
               .attr("dominant-baseline", "middle")
-              .attr("fill", "#fff")
-              .attr("font-size", `${fontSize}px`)
+              .attr("fill", "#fff").attr("font-size", `${fontSize}px`)
               .attr("pointer-events", "none")
               .text(ev.title);
 
@@ -391,7 +505,17 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onG
                 label = label.slice(0, -1);
                 txt.text(label + "…");
               }
-              if (label.length <= 3) txt.remove();
+              if (label.length <= 3) {
+                txt.remove();
+              } else if (isNew) {
+                txt.attr("y", newLabelY).attr("opacity", 0)
+                  .transition().duration(dur).attr("opacity", 1);
+              } else if (isResizing) {
+                txt.attr("y", oldLabelY)
+                  .transition().duration(dur).ease(ease).attr("y", newLabelY);
+              } else {
+                txt.attr("y", newLabelY);
+              }
             }
           }
       });
@@ -405,7 +529,55 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onG
           .attr("stroke-width", 1);
       }
     });
-  }, [events, activeRegions, activeTypes, windowStart, windowEnd, dims, isDetail]);
+
+    // ── Stripe legend ─────────────────────────────────────────────────────────
+    // Two items right-aligned: [swatch] Label   [swatch] Label
+    const legendRightX = MARGIN.left + innerW - 8;
+    const legendTopY   = MARGIN.top / 2;
+    const swatchH = 10;
+    const swatchW = 14;
+    const textGap = 4; // gap between swatch and label
+    const itemGap = 14; // gap between the two items
+
+    const legendGroup = svg.append("g").attr("pointer-events", "none");
+
+    // Item 2 (rightmost): solid swatch = "Active mandate"
+    const item2TextX = legendRightX;
+    legendGroup.append("text")
+      .attr("x", item2TextX).attr("y", legendTopY + swatchH / 2)
+      .attr("text-anchor", "end").attr("dominant-baseline", "middle")
+      .attr("fill", "#6B7280").attr("font-size", "9px").text("Active mandate");
+    // Measure approx text width (9px * ~0.55 char width)
+    const activeTextW = "Active mandate".length * 5.2;
+    const item2SwatchX = item2TextX - activeTextW - textGap - swatchW;
+    legendGroup.append("rect")
+      .attr("x", item2SwatchX).attr("y", legendTopY)
+      .attr("width", swatchW).attr("height", swatchH).attr("rx", 3)
+      .attr("fill", REGION_COLOR.WA).attr("fill-opacity", 0.8);
+    legendGroup.append("rect")
+      .attr("x", item2SwatchX).attr("y", legendTopY)
+      .attr("width", swatchW).attr("height", swatchH).attr("rx", 3)
+      .attr("fill", "none").attr("stroke", "#9CA3AF").attr("stroke-width", 0.5);
+
+    // Item 1 (left of item 2): striped swatch = "Announcement period"
+    const item1RightX = item2SwatchX - itemGap;
+    legendGroup.append("text")
+      .attr("x", item1RightX).attr("y", legendTopY + swatchH / 2)
+      .attr("text-anchor", "end").attr("dominant-baseline", "middle")
+      .attr("fill", "#6B7280").attr("font-size", "9px").text("Announcement period");
+    const annoTextW = "Announcement period".length * 5.2;
+    const item1SwatchX = item1RightX - annoTextW - textGap - swatchW;
+    legendGroup.append("rect")
+      .attr("x", item1SwatchX).attr("y", legendTopY)
+      .attr("width", swatchW).attr("height", swatchH).attr("rx", 3)
+      .attr("fill", "url(#stripe-WA)").attr("opacity", 0.85);
+    legendGroup.append("rect")
+      .attr("x", item1SwatchX).attr("y", legendTopY)
+      .attr("width", swatchW).attr("height", swatchH).attr("rx", 3)
+      .attr("fill", "none").attr("stroke", "#9CA3AF").attr("stroke-width", 0.5);
+
+    prevEventIdsRef.current = currentEventIds;
+  }, [layout, windowStart, windowEnd, dims, isDetail]);
 
   return (
     <div ref={containerRef} className="flex-1 overflow-hidden relative bg-white">

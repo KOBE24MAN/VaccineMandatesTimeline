@@ -20,6 +20,7 @@ interface ApiMandate {
   removal_date: string | null;
   duration_days: number | null;
   date_uncertain: boolean;
+  ongoing: boolean;
   visibility_level: number | null;
 }
 
@@ -48,6 +49,8 @@ function mapToIndex(m: ApiMandate): EventIndex {
     short_description: m.target_category,
     target: m.target ?? null,
     visibility_level: m.visibility_level ?? 6,
+    date_uncertain: m.date_uncertain,
+    ongoing: m.ongoing,
   };
 }
 

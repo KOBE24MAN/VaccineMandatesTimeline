@@ -26,6 +26,7 @@ export default function App() {
     selectAllCategories,
     clearAllCategories,
     isolateRegion,
+    enterCategoryMode,
   } = useFilters(events);
 
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -33,7 +34,14 @@ export default function App() {
   const [showFilter, setShowFilter] = useState(true);
   const [showDetail, setShowDetail] = useState(true);
   const [manualVisibilityLevel, setManualVisibilityLevel] = useState<number | null>(null);
-  const firstClick = useRef(true);
+  const [showOngoingTail, setShowOngoingTail] = useState(true);
+  const [showInfo, setShowInfo] = useState(false);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setShowInfo(false); }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   // Used to preserve zoom level when the timeline container resizes (panel open/close)
   const prevTimelineWidthRef = useRef(0);
@@ -45,14 +53,15 @@ export default function App() {
     setShowDetail(true);
     const ev = events.find(e => e.id === id);
     if (!ev) return;
-    if (firstClick.current) {
-      firstClick.current = false;
-      isolateRegion(ev.region);
-    }
     const center = parseDate(ev.start_date);
     const threeMonths = 90 * 24 * 60 * 60 * 1000;
     setWindowStart(new Date(center.getTime() - threeMonths));
     setWindowEnd(new Date(center.getTime() + threeMonths));
+  }
+
+  function handleEventDoubleClick(id: string) {
+    const ev = events.find(e => e.id === id);
+    if (ev) isolateRegion(ev.region);
   }
 
   function handleGroupClick(ids: string[]) {
@@ -84,22 +93,15 @@ export default function App() {
   const [windowStart, setWindowStart] = useState<Date | null>(null);
   const [windowEnd, setWindowEnd] = useState<Date | null>(null);
 
-  // Intro zoom: once events load, animate from full extent → 1-year target window
-  const hasAnimated = useRef(false);
-  useEffect(() => {
-    if (hasAnimated.current || events.length === 0) return;
-    hasAnimated.current = true;
+  function easeInOutCubic(t: number) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
 
+  function runIntroAnimation(fromStart: number, fromEnd: number) {
     const targetStart = new Date("2021-08-20");
     const targetEnd   = new Date("2022-08-20");
-    const duration    = 1800; // ms
+    const duration    = 1800;
     const startTime   = performance.now();
-    const fromStart   = fullStart.getTime();
-    const fromEnd     = fullEnd.getTime();
-
-    function easeInOutCubic(t: number) {
-      return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    }
 
     function frame(now: number) {
       const t = Math.min((now - startTime) / duration, 1);
@@ -110,6 +112,14 @@ export default function App() {
     }
 
     requestAnimationFrame(frame);
+  }
+
+  // Intro zoom: once events load, animate from full extent → 1-year target window
+  const hasAnimated = useRef(false);
+  useEffect(() => {
+    if (hasAnimated.current || events.length === 0) return;
+    hasAnimated.current = true;
+    runIntroAnimation(fullStart.getTime(), fullEnd.getTime());
   }, [events.length, fullStart, fullEnd]);
 
   const effectiveWindowStart = windowStart ?? fullStart;
@@ -164,11 +174,24 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-gray-100">
       {/* Top bar */}
-      <header className="flex items-center px-5 py-2.5 bg-white border-b border-gray-200 flex-shrink-0 z-20">
-        <div className="flex flex-col">
-          <span className="text-xl font-bold tracking-tight text-gray-900">MandEval</span>
-          <span className="text-xs text-gray-400 leading-tight">COVID-19 Vaccine Mandates Timeline</span>
+      <header className="flex items-center justify-between px-5 py-2.5 bg-white border-b border-gray-200 flex-shrink-0 z-20">
+        <div className="flex items-center gap-2.5">
+          <div className="flex flex-col">
+            <span className="text-xl font-bold tracking-tight text-gray-900">MandEval</span>
+            <span className="text-xs text-gray-400 leading-tight">COVID-19 Vaccine Mandates Timeline</span>
+          </div>
+          <button
+            onClick={() => setShowInfo(true)}
+            className="w-6 h-6 rounded-full border border-gray-300 text-gray-400 hover:text-gray-600 hover:border-gray-400 transition-colors flex items-center justify-center text-xs font-bold leading-none flex-shrink-0"
+            title="About MandEval"
+          >
+            ?
+          </button>
         </div>
+        <span className="text-xs text-gray-400">
+          Showing <span className="font-semibold text-gray-600">{visibleEvents.length}</span> of{" "}
+          <span className="font-semibold text-gray-600">{events.length}</span> mandates
+        </span>
       </header>
 
       {/* Body */}
@@ -196,6 +219,7 @@ export default function App() {
                 onToggleCategory={toggleCategory}
                 onSelectAllCategories={selectAllCategories}
                 onClearAllCategories={clearAllCategories}
+                onEnterCategoryMode={enterCategoryMode}
                 windowStart={effectiveWindowStart}
                 windowEnd={effectiveWindowEnd}
                 fullStart={fullStart}
@@ -204,6 +228,9 @@ export default function App() {
                 autoVisibilityLevel={autoVisibilityLevel}
                 manualVisibilityLevel={manualVisibilityLevel}
                 onVisibilityLevelChange={setManualVisibilityLevel}
+                showOngoingTail={showOngoingTail}
+                onToggleOngoingTail={() => setShowOngoingTail(v => !v)}
+                onResetWindow={() => runIntroAnimation(fullStart.getTime(), fullEnd.getTime())}
               />
             </div>
           </motion.aside>
@@ -223,10 +250,12 @@ export default function App() {
             activeRegions={activeRegions}
             activeTypes={activeTypes}
             onEventClick={handleEventClick}
+            onEventDoubleClick={handleEventDoubleClick}
             onGroupClick={handleGroupClick}
             windowStart={effectiveWindowStart}
             windowEnd={effectiveWindowEnd}
             onWidthChange={handleTimelineWidthChange}
+            showOngoingTail={showOngoingTail}
           />
           <Minimap
             events={events}
@@ -276,6 +305,54 @@ export default function App() {
           onSelectEvent={handleSelectFromGroup}
           onClose={() => setGroupedEventIds(null)}
         />
+      )}
+
+      {/* Info modal */}
+      {showInfo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setShowInfo(false)}
+          />
+          <div className="relative bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-xl mx-4 max-h-[80vh] overflow-y-auto p-6">
+            <button
+              onClick={() => setShowInfo(false)}
+              className="absolute top-3 right-3 w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors flex items-center justify-center text-gray-500 text-lg leading-none"
+              aria-label="Close"
+            >
+              ×
+            </button>
+            <h2 className="text-2xl font-bold text-gray-900 mb-1 pr-8">About this timeline</h2>
+
+            <div className="mt-4">
+              <h3 className="text-sm font-bold text-gray-800 mb-1.5">MandEval</h3>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                MandEval collected a structured dataset of COVID-19 vaccine mandate events so that researchers can compare how different policies developed across time and jurisdictions. This website turns that static dataset into an interactive public timeline that makes the key dates, jurisdictions, mandate types, and event details easier to explore.
+              </p>
+            </div>
+
+            <div className="mt-4">
+              <h3 className="text-sm font-bold text-gray-800 mb-1.5">How to use</h3>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                Use the minimap at the bottom to pan and zoom the timeline window. Click any mandate bar to open its detail panel. The filter bar on the left lets you narrow by jurisdiction, mandate event type, category, and visibility level. Double-click a bar to isolate that jurisdiction.
+              </p>
+            </div>
+
+            <div className="mt-4">
+              <h3 className="text-sm font-bold text-gray-800 mb-1.5">Reading the bars</h3>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                The striped portion of a bar represents the announcement-to-enforcement lead period. The solid portion is the active enforcement period. A dashed outline indicates an uncertain date. Bars that fade at the right edge are ongoing mandates with no recorded end date.
+              </p>
+            </div>
+
+            <div className="mt-4">
+              <h3 className="text-sm font-bold text-gray-800 mb-1.5">Project team</h3>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                This interactive tool was built as part of a CITS5551 engineering design project at The University of Western Australia by Zhiheng Zhou, Zijun Zhou, Joel Fitzpatrick, Jiaren Zhu, and Yupeng Sun. The site was designed to support public viewing, client handover, and later hosting on client or university infrastructure.
+              </p>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

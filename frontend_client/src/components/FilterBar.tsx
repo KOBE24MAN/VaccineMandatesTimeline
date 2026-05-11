@@ -17,6 +17,7 @@ interface Props {
   onToggleCategory: (cat: Category) => void;
   onSelectAllCategories: () => void;
   onClearAllCategories: () => void;
+  onEnterCategoryMode: () => void;
   windowStart: Date;
   windowEnd: Date;
   fullStart: Date;
@@ -25,6 +26,9 @@ interface Props {
   autoVisibilityLevel: number;
   manualVisibilityLevel: number | null;
   onVisibilityLevelChange: (level: number | null) => void;
+  showOngoingTail: boolean;
+  onToggleOngoingTail: () => void;
+  onResetWindow: () => void;
 }
 
 function toInputValue(d: Date): string {
@@ -44,6 +48,7 @@ export function FilterBar({
   onToggleCategory,
   onSelectAllCategories,
   onClearAllCategories,
+  onEnterCategoryMode,
   windowStart,
   windowEnd,
   fullStart,
@@ -52,11 +57,14 @@ export function FilterBar({
   autoVisibilityLevel,
   manualVisibilityLevel,
   onVisibilityLevelChange,
+  showOngoingTail,
+  onToggleOngoingTail,
+  onResetWindow,
 }: Props) {
   const [categoryMode, setCategoryMode] = useState(false);
 
   function enterCategoryMode() {
-    onClearAllTypes();
+    onEnterCategoryMode();
     setCategoryMode(true);
   }
 
@@ -106,7 +114,7 @@ export function FilterBar({
         </div>
         <div className="flex flex-wrap gap-1.5 mt-2 items-center">
           <button
-            onClick={() => onWindowChange(fullStart, fullEnd)}
+            onClick={onResetWindow}
             className="text-xs text-blue-500 hover:underline"
           >
             Reset
@@ -161,7 +169,7 @@ export function FilterBar({
       {/* Mandate type + category toggle */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Mandate type</p>
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Mandate Event</p>
           <AnimatePresence initial={false}>
             {!categoryMode && (
               <motion.div
@@ -274,6 +282,26 @@ export function FilterBar({
             Reset to auto
           </button>
         )}
+      </div>
+
+      {/* Display options */}
+      <div>
+        <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Experimental</p>
+        <label className="flex items-center justify-between cursor-pointer select-none">
+          <span className="text-sm text-gray-600">Ongoing tail</span>
+          <button
+            onClick={onToggleOngoingTail}
+            className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
+              showOngoingTail ? "bg-indigo-600" : "bg-gray-300"
+            }`}
+            role="switch"
+            aria-checked={showOngoingTail}
+          >
+            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+              showOngoingTail ? "translate-x-4" : "translate-x-1"
+            }`} />
+          </button>
+        </label>
       </div>
 
       <p className="text-xs text-gray-400 leading-relaxed mt-auto">

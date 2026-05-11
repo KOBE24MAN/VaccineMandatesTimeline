@@ -17,6 +17,7 @@ interface UseFiltersReturn {
   selectAllCategories: () => void;
   clearAllCategories: () => void;
   isolateRegion: (region: Region) => void;
+  enterCategoryMode: () => void;
 }
 
 /**
@@ -39,7 +40,10 @@ export function useFilters(events: EventIndex[]): UseFiltersReturn {
     const allCatsActive = activeCategories.size === ALL_CATEGORIES.length;
     return events.filter(e => {
       if (!activeRegions.has(e.region)) return false;
+      // Normal mode: types active + all categories — type filter only
+      if (allCatsActive && activeTypes.size > 0) return activeTypes.has(e.type);
       const cats = (e.short_description ?? "").split(",").map(s => s.trim()) as Category[];
+      // Category mode (all cats, no types): show everything; partial cats: match active ones
       const matchesCategory = allCatsActive || cats.some(c => activeCategories.has(c));
       return activeTypes.has(e.type) || matchesCategory;
     });
@@ -69,6 +73,22 @@ export function useFilters(events: EventIndex[]): UseFiltersReturn {
     });
   }
 
+  function enterCategoryMode() {
+    // Pre-select only categories that have at least one event matching the
+    // currently active types — so deselected types carry over as deselected categories.
+    const relevant = new Set<Category>();
+    for (const ev of events) {
+      if (!activeTypes.has(ev.type)) continue;
+      const cats = (ev.short_description ?? "").split(",").map(s => s.trim());
+      cats.forEach(c => {
+        if ((ALL_CATEGORIES as readonly string[]).includes(c)) relevant.add(c as Category);
+      });
+    }
+    // Fall back to all categories if nothing could be derived (e.g. all types were off)
+    setActiveCategories(relevant.size > 0 ? relevant : new Set(ALL_CATEGORIES));
+    setActiveTypes(new Set());
+  }
+
   return {
     activeRegions,
     activeTypes,
@@ -84,5 +104,6 @@ export function useFilters(events: EventIndex[]): UseFiltersReturn {
     selectAllCategories: () => setActiveCategories(new Set(ALL_CATEGORIES)),
     clearAllCategories: () => setActiveCategories(new Set()),
     isolateRegion: (region: Region) => setActiveRegions(new Set([region])),
+    enterCategoryMode,
   };
 }

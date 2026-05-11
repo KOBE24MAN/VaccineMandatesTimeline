@@ -69,6 +69,7 @@ class MandateSummary(BaseModel):
     removal_date: Optional[str] = None
     duration_days: Optional[int] = None
     date_uncertain: bool = False
+    ongoing: bool = False
     visibility_level: Optional[int] = None
 
 
@@ -141,6 +142,7 @@ class HealthResponse(BaseModel):
 def row_to_summary(row) -> dict:
     d = dict(row)
     d["date_uncertain"] = bool(d.get("date_uncertain", 0))
+    d["ongoing"] = bool(d.get("ongoing", 0))
     return d
 
 
@@ -217,7 +219,7 @@ def list_mandates(
     query = f"""
         SELECT m.id, m.jurisdiction, m.name, m.type, m.target, m.target_category,
                m.effective_date, m.enforcement_date, m.removal_date,
-               m.duration_days, m.date_uncertain, m.visibility_level
+               m.duration_days, m.date_uncertain, m.ongoing, m.visibility_level
         FROM mandates m
         WHERE {where}
         ORDER BY m.effective_date ASC, m.jurisdiction ASC

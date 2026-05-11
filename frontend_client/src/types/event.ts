@@ -14,6 +14,8 @@ export interface EventIndex {
   short_description: string | null;
   target: string | null;
   visibility_level: number; // 1 (most prominent) – 6 (most detailed)
+  date_uncertain: boolean;
+  ongoing: boolean;
 }
 
 /** Full record returned by /api/mandates/:id — shown in EventDetail panel */
