@@ -41,7 +41,7 @@ function mapToIndex(m: ApiMandate): EventIndex {
   return {
     id: m.id,
     title: m.name ?? m.id,
-    start_date: m.effective_date ?? "",
+    start_date: m.effective_date ?? m.enforcement_date ?? "",
     end_date: m.removal_date ?? null,
     enforcement_date: m.enforcement_date ?? null,
     region: m.jurisdiction as Region,
@@ -92,7 +92,7 @@ export function useEvents(): UseEventsReturn {
       })
       .then(({ mandates }) => {
         if (!cancelled) {
-          setEvents(mandates.filter(m => m.effective_date).map(mapToIndex));
+          setEvents(mandates.filter(m => m.effective_date || m.enforcement_date).map(mapToIndex));
           setLoading(false);
         }
       })

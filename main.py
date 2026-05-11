@@ -129,6 +129,16 @@ class FiltersResponse(BaseModel):
     categories: list[str]
 
 
+class NotableEventResponse(BaseModel):
+    id: int
+    event_date: str
+    date_end: Optional[str] = None
+    date_approximate: bool
+    title: str
+    description: Optional[str] = None
+    source: Optional[str] = None
+
+
 class HealthResponse(BaseModel):
     status: str
     database: str
@@ -360,6 +370,25 @@ def get_filters():
         "types": types,
         "categories": categories,
     }
+
+
+@app.get("/api/notable-events", response_model=list[NotableEventResponse])
+def list_notable_events():
+    """Return all notable historical events for timeline overlay."""
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM notable_events ORDER BY event_date").fetchall()
+    return [
+        {
+            "id": r["id"],
+            "event_date": r["event_date"],
+            "date_end": r["date_end"],
+            "date_approximate": bool(r["date_approximate"]),
+            "title": r["title"],
+            "description": r["description"],
+            "source": r["source"],
+        }
+        for r in rows
+    ]
 
 
 @app.get("/health", response_model=HealthResponse)

@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { useEvents } from "./hooks/useEvents";
 import { useFilters } from "./hooks/useFilters";
+import { useNotableEvents } from "./hooks/useNotableEvents";
 import { FilterBar } from "./components/FilterBar";
 import { Timeline } from "./components/Timeline";
 import { Minimap } from "./components/Minimap";
@@ -11,6 +12,8 @@ import { parseDate } from "./utils/dates";
 
 export default function App() {
   const { events, loading, error, fetchDetail } = useEvents();
+  const notableEvents = useNotableEvents();
+  const [activeNotableEventIds, setActiveNotableEventIds] = useState<Set<number>>(new Set());
   const {
     activeRegions,
     activeTypes,
@@ -35,6 +38,8 @@ export default function App() {
   const [showDetail, setShowDetail] = useState(true);
   const [manualVisibilityLevel, setManualVisibilityLevel] = useState<number | null>(null);
   const [showOngoingTail, setShowOngoingTail] = useState(true);
+  const [showNotableLabels, setShowNotableLabels] = useState(true);
+  const [tooltipTransparent, setTooltipTransparent] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
 
   useEffect(() => {
@@ -42,6 +47,7 @@ export default function App() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
+
 
   // Used to preserve zoom level when the timeline container resizes (panel open/close)
   const prevTimelineWidthRef = useRef(0);
@@ -98,8 +104,8 @@ export default function App() {
   }
 
   function runIntroAnimation(fromStart: number, fromEnd: number) {
-    const targetStart = new Date("2021-08-20");
-    const targetEnd   = new Date("2022-08-20");
+    const targetStart = new Date("2021-06-01");
+    const targetEnd   = new Date("2022-12-01");
     const duration    = 1800;
     const startTime   = performance.now();
 
@@ -151,7 +157,27 @@ export default function App() {
     windowDays > 90   ? 5 : 6;
 
   const effectiveVisibilityLevel = manualVisibilityLevel ?? autoVisibilityLevel;
-  const visibleEvents = filteredEvents.filter(e => e.visibility_level <= effectiveVisibilityLevel);
+
+  // Group filteredEvents by their deduplication key (same key used in Timeline).
+  // If any member of a group is visible at the current level, include ALL members
+  // so the stacked badge count stays stable as you zoom in.
+  const visibleEvents = useMemo(() => {
+    const dedupKey = (e: typeof filteredEvents[0]) =>
+      `${e.title}||${e.region}||${e.start_date ?? ""}||${e.end_date ?? ""}`;
+    const groups = new Map<string, typeof filteredEvents>();
+    for (const e of filteredEvents) {
+      const k = dedupKey(e);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(e);
+    }
+    const result: typeof filteredEvents = [];
+    for (const group of groups.values()) {
+      if (group.some(e => e.visibility_level <= effectiveVisibilityLevel)) {
+        result.push(...group);
+      }
+    }
+    return result;
+  }, [filteredEvents, effectiveVisibilityLevel]);
 
   if (loading) {
     return (
@@ -230,7 +256,20 @@ export default function App() {
                 onVisibilityLevelChange={setManualVisibilityLevel}
                 showOngoingTail={showOngoingTail}
                 onToggleOngoingTail={() => setShowOngoingTail(v => !v)}
+                tooltipTransparent={tooltipTransparent}
+                onToggleTooltipTransparent={() => setTooltipTransparent(v => !v)}
                 onResetWindow={() => runIntroAnimation(fullStart.getTime(), fullEnd.getTime())}
+                notableEvents={notableEvents}
+                activeNotableEventIds={activeNotableEventIds}
+                onToggleNotableEvent={id => setActiveNotableEventIds(prev => {
+                  const next = new Set(prev);
+                  next.has(id) ? next.delete(id) : next.add(id);
+                  return next;
+                })}
+                onSelectAllNotableEvents={() => setActiveNotableEventIds(new Set(notableEvents.map(e => e.id)))}
+                onClearAllNotableEvents={() => setActiveNotableEventIds(new Set())}
+                showNotableLabels={showNotableLabels}
+                onToggleNotableLabels={() => setShowNotableLabels(v => !v)}
               />
             </div>
           </motion.aside>
@@ -256,6 +295,9 @@ export default function App() {
             windowEnd={effectiveWindowEnd}
             onWidthChange={handleTimelineWidthChange}
             showOngoingTail={showOngoingTail}
+            tooltipTransparent={tooltipTransparent}
+            notableEvents={notableEvents.filter(e => activeNotableEventIds.has(e.id))}
+            showNotableLabels={showNotableLabels}
           />
           <Minimap
             events={events}

@@ -59,3 +59,15 @@ export const ALL_CATEGORIES = [
 ] as const;
 
 export type Category = typeof ALL_CATEGORIES[number];
+
+export interface NotableEvent {
+  id: number;
+  event_date: string;
+  date_end: string | null;
+  date_approximate: boolean;
+  title: string;
+  description: string | null;
+  source: string | null;
+  /** Resolved display date — midpoint for approximate ranged events */
+  display_date: string;
+}

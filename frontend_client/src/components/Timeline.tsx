@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useMemo } from "react";
 import * as d3 from "d3";
-import type { EventIndex, Region, EventType } from "../types/event";
+import type { EventIndex, Region, EventType, NotableEvent } from "../types/event";
 import { ALL_REGIONS } from "../types/event";
 import { parseDate, yearsBetween } from "../utils/dates";
 
@@ -97,9 +97,12 @@ interface Props {
   windowEnd: Date;
   onWidthChange?: (width: number) => void;
   showOngoingTail?: boolean;
+  notableEvents?: NotableEvent[];
+  showNotableLabels?: boolean;
+  tooltipTransparent?: boolean;
 }
 
-export function Timeline({ events, activeRegions, activeTypes, onEventClick, onEventDoubleClick, onGroupClick, windowStart, windowEnd, onWidthChange, showOngoingTail = true }: Props) {
+export function Timeline({ events, activeRegions, activeTypes, onEventClick, onEventDoubleClick, onGroupClick, windowStart, windowEnd, onWidthChange, showOngoingTail = true, notableEvents = [], showNotableLabels = true, tooltipTransparent = false }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef       = useRef<SVGSVGElement>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
@@ -486,7 +489,7 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
           const visibleX1 = Math.max(x1, MARGIN.left);
           const visibleX2 = Math.min(x2, MARGIN.left + innerW);
           const visibleW  = visibleX2 - visibleX1;
-          const fontSize  = Math.min(Math.floor(barH * 0.6), 12);
+          const fontSize  = Math.min(Math.max(Math.round(barH * 0.45), 10), 22);
           if (barH >= 14 && visibleW > 50) {
             const newLabelY = barY + barH / 2;
             const oldLabelY = prevDims ? prevDims.barY + prevDims.barH / 2 : newLabelY;
@@ -527,6 +530,50 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
           .attr("y1", y + rowH).attr("y2", y + rowH)
           .attr("stroke", "#E5E7EB")
           .attr("stroke-width", 1);
+      }
+    });
+
+    // ── Notable event lines ───────────────────────────────────────────────────
+    notableEvents.forEach(ev => {
+      const d = parseDate(ev.display_date);
+      const x = xScale(d);
+      if (x < MARGIN.left || x > MARGIN.left + innerW) return;
+
+      svg.append("line")
+        .attr("x1", x).attr("x2", x)
+        .attr("y1", MARGIN.top).attr("y2", MARGIN.top + innerH)
+        .attr("stroke", "#EF4444")
+        .attr("stroke-width", 1.5)
+        .attr("stroke-dasharray", "4,3")
+        .attr("pointer-events", "none");
+
+      if (showNotableLabels) {
+        const label = ev.title + (ev.date_approximate ? " ~" : "");
+        const fontSize = 11;
+        const padX = 5, padY = 3;
+        // Measure approximate text width (11px * ~0.57 char width)
+        const approxTextW = label.length * fontSize * 0.57;
+        const tagH = fontSize + padY * 2;
+        const tagY = MARGIN.top + 4;
+        // Keep tag inside the viewport
+        const tagX = Math.min(x + 1, MARGIN.left + innerW - approxTextW - padX * 2 - 2);
+
+        svg.append("rect")
+          .attr("x", tagX).attr("y", tagY)
+          .attr("width", approxTextW + padX * 2).attr("height", tagH)
+          .attr("rx", 3)
+          .attr("fill", "#EF4444")
+          .attr("pointer-events", "none");
+
+        svg.append("text")
+          .attr("x", tagX + padX)
+          .attr("y", tagY + padY)
+          .attr("dominant-baseline", "hanging")
+          .attr("fill", "#fff")
+          .attr("font-size", `${fontSize}px`)
+          .attr("font-weight", "700")
+          .attr("pointer-events", "none")
+          .text(label);
       }
     });
 
@@ -585,23 +632,27 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
 
       {tooltip && (
         <div
-          className="absolute z-10 pointer-events-none bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-xs max-w-xs"
+          className={`absolute z-10 pointer-events-none border rounded-lg p-3 text-xs max-w-xs transition-colors ${
+            tooltipTransparent
+              ? "bg-white/50 backdrop-blur-sm border-gray-200/60 shadow-sm"
+              : "bg-white border-gray-200 shadow-lg"
+          }`}
           style={{
             left: tooltip.x + 14,
             top:  tooltip.y - 8,
             transform: tooltip.x > dims.width * 0.65 ? "translateX(-110%)" : undefined,
           }}
         >
-          <p className="font-semibold text-gray-800 mb-1">{tooltip.event.title}</p>
-          <p className="text-gray-500">{tooltip.event.region} · {tooltip.event.type}</p>
-          <p className="text-gray-500">
+          <p className={`font-semibold mb-1 ${tooltipTransparent ? "text-gray-900" : "text-gray-800"}`}>{tooltip.event.title}</p>
+          <p className={tooltipTransparent ? "text-gray-600" : "text-gray-500"}>{tooltip.event.region} · {tooltip.event.type}</p>
+          <p className={tooltipTransparent ? "text-gray-600" : "text-gray-500"}>
             {tooltip.event.start_date}
             {tooltip.event.end_date ? ` — ${tooltip.event.end_date}` : " (ongoing)"}
           </p>
           {tooltip.event.short_description && (
             <ul className="mt-1 space-y-0.5 list-none">
               {tooltip.event.short_description.split("\n").map((line, i) => (
-                <li key={i} className="text-gray-600 leading-snug">· {line}</li>
+                <li key={i} className={`leading-snug ${tooltipTransparent ? "text-gray-600" : "text-gray-600"}`}>· {line}</li>
               ))}
             </ul>
           )}

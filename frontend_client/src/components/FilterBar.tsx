@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { Region, EventType, Category } from "../types/event";
+import type { Region, EventType, Category, NotableEvent } from "../types/event";
 import { ALL_REGIONS, ALL_EVENT_TYPES, ALL_CATEGORIES } from "../types/event";
 import { REGION_COLOR } from "./Timeline";
 
@@ -28,7 +28,16 @@ interface Props {
   onVisibilityLevelChange: (level: number | null) => void;
   showOngoingTail: boolean;
   onToggleOngoingTail: () => void;
+  tooltipTransparent: boolean;
+  onToggleTooltipTransparent: () => void;
   onResetWindow: () => void;
+  notableEvents: NotableEvent[];
+  activeNotableEventIds: Set<number>;
+  onToggleNotableEvent: (id: number) => void;
+  onSelectAllNotableEvents: () => void;
+  onClearAllNotableEvents: () => void;
+  showNotableLabels: boolean;
+  onToggleNotableLabels: () => void;
 }
 
 function toInputValue(d: Date): string {
@@ -59,7 +68,16 @@ export function FilterBar({
   onVisibilityLevelChange,
   showOngoingTail,
   onToggleOngoingTail,
+  tooltipTransparent,
+  onToggleTooltipTransparent,
   onResetWindow,
+  notableEvents,
+  activeNotableEventIds,
+  onToggleNotableEvent,
+  onSelectAllNotableEvents,
+  onClearAllNotableEvents,
+  showNotableLabels,
+  onToggleNotableLabels,
 }: Props) {
   const [categoryMode, setCategoryMode] = useState(false);
 
@@ -112,27 +130,52 @@ export function FilterBar({
             className="w-full border border-gray-300 rounded px-2 py-1 text-sm text-gray-700"
           />
         </div>
-        <div className="flex flex-wrap gap-1.5 mt-2 items-center">
+        <div className="flex items-center justify-between mt-2">
           <button
             onClick={onResetWindow}
             className="text-xs text-blue-500 hover:underline"
           >
             Reset
           </button>
-          <span className="text-gray-300">|</span>
-          {([["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24], ["3Y", 36]] as [string, number][]).map(([label, months]) => (
-            <button
-              key={label}
-              onClick={() => {
-                const center = new Date((windowStart.getTime() + windowEnd.getTime()) / 2);
-                const half = (months / 12) * 365.25 * 24 * 60 * 60 * 1000 / 2;
-                onWindowChange(new Date(center.getTime() - half), new Date(center.getTime() + half));
-              }}
-              className="px-2 py-0.5 rounded text-xs border border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600 transition-colors"
-            >
-              {label}
-            </button>
-          ))}
+          <div className="flex items-center gap-2">
+            {(() => {
+              // Representative window sizes (days) for each visibility level 1–6
+              const LEVEL_DAYS = [1460, 912, 549, 270, 135, 60];
+              const MS = 24 * 60 * 60 * 1000;
+              const windowDays = (windowEnd.getTime() - windowStart.getTime()) / MS;
+              const currentLevel =
+                windowDays > 1095 ? 1 :
+                windowDays > 730  ? 2 :
+                windowDays > 365  ? 3 :
+                windowDays > 180  ? 4 :
+                windowDays > 90   ? 5 : 6;
+
+              function stepTo(level: number) {
+                const days = LEVEL_DAYS[level - 1];
+                const center = (windowStart.getTime() + windowEnd.getTime()) / 2;
+                const half = (days / 2) * MS;
+                onWindowChange(new Date(center - half), new Date(center + half));
+              }
+
+              return (
+                <>
+                  <button
+                    onClick={() => stepTo(Math.max(currentLevel - 1, 1))}
+                    disabled={currentLevel <= 1}
+                    className="w-7 h-7 flex items-center justify-center rounded border border-gray-300 text-gray-600 text-base hover:border-blue-400 hover:text-blue-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    title="Zoom out (fewer events)"
+                  >−</button>
+                  <span className="text-xs text-gray-400">Level {currentLevel}</span>
+                  <button
+                    onClick={() => stepTo(Math.min(currentLevel + 1, 6))}
+                    disabled={currentLevel >= 6}
+                    className="w-7 h-7 flex items-center justify-center rounded border border-gray-300 text-gray-600 text-base hover:border-blue-400 hover:text-blue-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    title="Zoom in (more events)"
+                  >+</button>
+                </>
+              );
+            })()}
+          </div>
         </div>
       </div>
 
@@ -287,22 +330,88 @@ export function FilterBar({
       {/* Display options */}
       <div>
         <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Experimental</p>
-        <label className="flex items-center justify-between cursor-pointer select-none">
-          <span className="text-sm text-gray-600">Ongoing tail</span>
-          <button
-            onClick={onToggleOngoingTail}
-            className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
-              showOngoingTail ? "bg-indigo-600" : "bg-gray-300"
-            }`}
-            role="switch"
-            aria-checked={showOngoingTail}
-          >
-            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-              showOngoingTail ? "translate-x-4" : "translate-x-1"
-            }`} />
-          </button>
-        </label>
+        <div className="flex flex-col gap-2">
+          <label className="flex items-center justify-between cursor-pointer select-none">
+            <span className="text-sm text-gray-600">Ongoing tail</span>
+            <button
+              onClick={onToggleOngoingTail}
+              className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
+                showOngoingTail ? "bg-indigo-600" : "bg-gray-300"
+              }`}
+              role="switch"
+              aria-checked={showOngoingTail}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                showOngoingTail ? "translate-x-4" : "translate-x-1"
+              }`} />
+            </button>
+          </label>
+          <label className="flex items-center justify-between cursor-pointer select-none">
+            <span className="text-sm text-gray-600">Transparent tooltip</span>
+            <button
+              onClick={onToggleTooltipTransparent}
+              className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
+                tooltipTransparent ? "bg-indigo-600" : "bg-gray-300"
+              }`}
+              role="switch"
+              aria-checked={tooltipTransparent}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                tooltipTransparent ? "translate-x-4" : "translate-x-1"
+              }`} />
+            </button>
+          </label>
+        </div>
       </div>
+
+      {/* Notable Events */}
+      {notableEvents.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Notable Events</p>
+            <div className="flex gap-2">
+              <button onClick={onSelectAllNotableEvents} className="text-xs text-blue-500 hover:underline">All</button>
+              <button onClick={onClearAllNotableEvents} className="text-xs text-blue-500 hover:underline">Clear</button>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {notableEvents.map(ev => {
+              const active = activeNotableEventIds.has(ev.id);
+              return (
+                <button
+                  key={ev.id}
+                  onClick={() => onToggleNotableEvent(ev.id)}
+                  title={`${ev.display_date}${ev.date_approximate ? " (approx.)" : ""}\n${ev.description ?? ""}`}
+                  className={`px-2.5 py-1.5 rounded text-xs border text-left transition-colors leading-snug ${
+                    active
+                      ? "bg-red-50 text-red-700 border-red-400"
+                      : "bg-white text-gray-500 border-gray-300 hover:border-red-300 hover:text-red-500"
+                  }`}
+                >
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 mb-px ${active ? "bg-red-500" : "bg-gray-300"}`} />
+                  {ev.title}
+                  {ev.date_approximate && <span className="ml-1 opacity-60 text-[10px]">~</span>}
+                </button>
+              );
+            })}
+          </div>
+          <label className="flex items-center justify-between cursor-pointer select-none mt-2">
+            <span className="text-xs text-gray-500">Show labels</span>
+            <button
+              onClick={onToggleNotableLabels}
+              className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
+                showNotableLabels ? "bg-red-500" : "bg-gray-300"
+              }`}
+              role="switch"
+              aria-checked={showNotableLabels}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                showNotableLabels ? "translate-x-4" : "translate-x-1"
+              }`} />
+            </button>
+          </label>
+        </div>
+      )}
 
       <p className="text-xs text-gray-400 leading-relaxed mt-auto">
         Jurisdiction colours are consistent across the timeline. Use the top bar to hide either panel for a wider view.
