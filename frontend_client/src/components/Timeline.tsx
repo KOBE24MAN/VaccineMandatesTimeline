@@ -100,9 +100,11 @@ interface Props {
   notableEvents?: NotableEvent[];
   showNotableLabels?: boolean;
   tooltipTransparent?: boolean;
+  selectedEventId?: string | null;
+  unstackBars?: boolean;
 }
 
-export function Timeline({ events, activeRegions, activeTypes, onEventClick, onEventDoubleClick, onGroupClick, windowStart, windowEnd, onWidthChange, showOngoingTail = true, notableEvents = [], showNotableLabels = true, tooltipTransparent = false }: Props) {
+export function Timeline({ events, activeRegions, activeTypes, onEventClick, onEventDoubleClick, onGroupClick, windowStart, windowEnd, onWidthChange, showOngoingTail = true, notableEvents = [], showNotableLabels = true, tooltipTransparent = false, selectedEventId = null, unstackBars = false }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef       = useRef<SVGSVGElement>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
@@ -145,7 +147,7 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
   // not on every window pan/zoom.
   const layout = useMemo(() => {
     const visibleRegions = ALL_REGIONS.filter(r => activeRegions.has(r));
-    const dedupedEvents = deduplicateEvents(events);
+    const dedupedEvents = unstackBars ? events : deduplicateEvents(events);
     const byRegion = new Map<Region, DeduplicatedEvent[]>();
     visibleRegions.forEach(r => byRegion.set(r, []));
     dedupedEvents.forEach(e => { byRegion.get(e.region as Region)?.push(e); });
@@ -161,7 +163,7 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
     });
 
     return { visibleRegions, dedupedEvents, byRegion, lanesPerRegion, laneCountPerRegion };
-  }, [events, activeRegions]);
+  }, [events, activeRegions, unstackBars]);
 
   useEffect(() => {
     const svgEl = svgRef.current;
@@ -203,6 +205,14 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
 
     // ── Defs: stripe patterns (one per region colour) ─────────────────────────
     const defs = svg.append("defs");
+
+    // Glow filter for selected bars
+    const glowFilter = defs.append("filter").attr("id", "bar-glow").attr("x", "-40%").attr("y", "-40%").attr("width", "180%").attr("height", "180%");
+    glowFilter.append("feDropShadow").attr("dx", 0).attr("dy", 0).attr("stdDeviation", 6).attr("flood-color", "currentColor").attr("flood-opacity", 1);
+
+    // Subtle drop shadow for label text
+    const textShadowFilter = defs.append("filter").attr("id", "text-shadow").attr("x", "-5%").attr("y", "-5%").attr("width", "110%").attr("height", "110%");
+    textShadowFilter.append("feDropShadow").attr("dx", 0).attr("dy", 1).attr("stdDeviation", 1.5).attr("flood-color", "#000").attr("flood-opacity", 0.35);
     ALL_REGIONS.forEach(r => {
       const col = REGION_COLOR[r];
       const pid = `stripe-${r}`;
@@ -246,6 +256,13 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
         .attr("fill", "#9CA3AF")
         .attr("font-size", "11px")
         .attr("y", -16));
+
+    const dur  = 380;
+    const ease = d3.easeCubicOut;
+
+    // Badges are collected here and rendered after all bars so they always sit on top
+    type BadgeData = { x: number; newY: number; oldY: number; count: number; isNew: boolean; isResizing: boolean };
+    const pendingBadges: BadgeData[] = [];
 
     // ── Rows + bars ───────────────────────────────────────────────────────────
     rowMeta.forEach(({ region, rowH, laneH, barH, y }, ri) => {
@@ -291,6 +308,10 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
           const rx    = barH / 2;
           const barColor = eventColor(region, ev.type);
           const outlineColor = REGION_COLOR[region];
+          const isSelected = selectedEventId !== null && (
+            ev.id === selectedEventId ||
+            (ev.mergedIds?.includes(selectedEventId) ?? false)
+          );
 
           const isNew = prevEventIdsRef.current.size > 0
             && !prevEventIdsRef.current.has(ev.id);
@@ -299,8 +320,6 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
           const isResizing = !isNew && !!prevDims
             && (prevDims.barY !== barY || prevDims.barH !== barH);
 
-          const dur  = 380;
-          const ease = d3.easeCubicOut;
           const midY = barY + barH / 2;
 
           prevBarDimsRef.current.set(ev.id, { barY, barH });
@@ -341,7 +360,7 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
           g.append("rect")
             .attr("x", x1).attr("y", barY)
             .attr("width", w).attr("height", barH)
-            .attr("fill", barColor).attr("fill-opacity", 0.85);
+            .attr("fill", barColor).attr("fill-opacity", isSelected ? 1 : 0.75);
 
           if (ev.enforcement_date) {
             const enfD = parseDate(ev.enforcement_date);
@@ -383,10 +402,12 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
             .attr("x", x1).attr("width", ev.ongoing ? w + rx : w).attr("rx", rx)
             .attr("fill", "none")
             .attr("stroke", outlineColor)
-            .attr("stroke-width", ev.date_uncertain ? 1.5 : 1)
-            .attr("stroke-opacity", 0.5)
-            .attr("stroke-dasharray", ev.date_uncertain ? "4,3" : null)
-            .attr("pointer-events", "none");
+            .attr("stroke-width", isSelected ? 5 : ev.date_uncertain ? 1.5 : 1)
+            .attr("stroke-opacity", isSelected ? 1 : 0.5)
+            .attr("stroke-dasharray", ev.date_uncertain && !isSelected ? "4,3" : null)
+            .attr("pointer-events", "none")
+            .attr("color", outlineColor)
+            .attr("filter", isSelected ? "url(#bar-glow)" : null);
 
           if (isNew) {
             outline.attr("y", midY).attr("height", 0)
@@ -452,37 +473,13 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
               }
             });
 
-          // ── Badge ──────────────────────────────────────────────────────────
+          // ── Badge (deferred — rendered after all bars) ─────────────────────
           if (ev.mergedIds && ev.mergedIds.length > 1 && w > 20) {
             const badgeW  = 16;
-            const badgeH  = 11;
             const badgeX  = Math.min(x1 + w - badgeW - 3, MARGIN.left + innerW - badgeW - 3);
             const newBadgeY = barY + 3;
             const oldBadgeY = prevDims ? prevDims.barY + 3 : newBadgeY;
-
-            const badgeRect = svg.append("rect")
-              .attr("x", badgeX).attr("width", badgeW).attr("height", badgeH)
-              .attr("rx", 3).attr("fill", "#1F2937").attr("pointer-events", "none");
-            const badgeTxt = svg.append("text")
-              .attr("x", badgeX + badgeW / 2)
-              .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
-              .attr("fill", "#fff").attr("font-size", "8px").attr("font-weight", "700")
-              .attr("pointer-events", "none").text(`×${ev.mergedIds.length}`);
-
-            if (isNew) {
-              badgeRect.attr("y", newBadgeY).attr("opacity", 0)
-                .transition().duration(dur).attr("opacity", 1);
-              badgeTxt.attr("y", newBadgeY + badgeH / 2).attr("opacity", 0)
-                .transition().duration(dur).attr("opacity", 1);
-            } else if (isResizing) {
-              badgeRect.attr("y", oldBadgeY)
-                .transition().duration(dur).ease(ease).attr("y", newBadgeY);
-              badgeTxt.attr("y", oldBadgeY + badgeH / 2)
-                .transition().duration(dur).ease(ease).attr("y", newBadgeY + badgeH / 2);
-            } else {
-              badgeRect.attr("y", newBadgeY);
-              badgeTxt.attr("y", newBadgeY + badgeH / 2);
-            }
+            pendingBadges.push({ x: badgeX, newY: newBadgeY, oldY: oldBadgeY, count: ev.mergedIds.length, isNew, isResizing });
           }
 
           // ── Label ──────────────────────────────────────────────────────────
@@ -498,6 +495,7 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
               .attr("x", visibleX1 + rx + 4)
               .attr("dominant-baseline", "middle")
               .attr("fill", "#fff").attr("font-size", `${fontSize}px`)
+              .attr("filter", "url(#text-shadow)")
               .attr("pointer-events", "none")
               .text(ev.title);
 
@@ -533,49 +531,101 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
       }
     });
 
-    // ── Notable event lines ───────────────────────────────────────────────────
-    notableEvents.forEach(ev => {
-      const d = parseDate(ev.display_date);
-      const x = xScale(d);
-      if (x < MARGIN.left || x > MARGIN.left + innerW) return;
+    // ── Badges (rendered on top of all bars) ─────────────────────────────────
+    const badgeW = 16;
+    const badgeH = 11;
+    pendingBadges.forEach(({ x, newY, oldY, count, isNew, isResizing }) => {
+      const badgeRect = svg.append("rect")
+        .attr("x", x).attr("width", badgeW).attr("height", badgeH)
+        .attr("rx", 3).attr("fill", "#1F2937").attr("pointer-events", "none");
+      const badgeTxt = svg.append("text")
+        .attr("x", x + badgeW / 2)
+        .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
+        .attr("fill", "#fff").attr("font-size", "8px").attr("font-weight", "700")
+        .attr("pointer-events", "none").text(`×${count}`);
 
+      if (isNew) {
+        badgeRect.attr("y", newY).attr("opacity", 0)
+          .transition().duration(dur).attr("opacity", 1);
+        badgeTxt.attr("y", newY + badgeH / 2).attr("opacity", 0)
+          .transition().duration(dur).attr("opacity", 1);
+      } else if (isResizing) {
+        badgeRect.attr("y", oldY)
+          .transition().duration(dur).ease(ease).attr("y", newY);
+        badgeTxt.attr("y", oldY + badgeH / 2)
+          .transition().duration(dur).ease(ease).attr("y", newY + badgeH / 2);
+      } else {
+        badgeRect.attr("y", newY);
+        badgeTxt.attr("y", newY + badgeH / 2);
+      }
+    });
+
+    // ── Notable event lines ───────────────────────────────────────────────────
+    // Filter to events visible in the current viewport
+    const visibleNotable = notableEvents
+      .map(ev => ({ ev, lineX: xScale(parseDate(ev.display_date)) }))
+      .filter(({ lineX }) => lineX >= MARGIN.left && lineX <= MARGIN.left + innerW);
+
+    // Draw vertical lines
+    visibleNotable.forEach(({ lineX }) => {
       svg.append("line")
-        .attr("x1", x).attr("x2", x)
+        .attr("x1", lineX).attr("x2", lineX)
         .attr("y1", MARGIN.top).attr("y2", MARGIN.top + innerH)
         .attr("stroke", "#EF4444")
         .attr("stroke-width", 1.5)
         .attr("stroke-dasharray", "4,3")
         .attr("pointer-events", "none");
+    });
 
-      if (showNotableLabels) {
-        const label = ev.title + (ev.date_approximate ? " ~" : "");
-        const fontSize = 11;
-        const padX = 5, padY = 3;
-        // Measure approximate text width (11px * ~0.57 char width)
-        const approxTextW = label.length * fontSize * 0.57;
-        const tagH = fontSize + padY * 2;
-        const tagY = MARGIN.top + 4;
-        // Keep tag inside the viewport
-        const tagX = Math.min(x + 1, MARGIN.left + innerW - approxTextW - padX * 2 - 2);
+    // Draw non-overlapping labels
+    if (showNotableLabels && visibleNotable.length > 0) {
+      const fontSize = 11;
+      const padX = 5, padY = 3;
+      const tagH = fontSize + padY * 2;
+      const tagY = MARGIN.top + 4;
+      const GAP = 4;
+
+      // Build items sorted by line position
+      const items = visibleNotable
+        .map(({ ev, lineX }) => {
+          const label = ev.title + (ev.date_approximate ? " ~" : "");
+          const tagW = Math.round(label.length * fontSize * 0.57) + padX * 2;
+          const tagX = Math.max(Math.min(lineX + 1, MARGIN.left + innerW - tagW - 2), MARGIN.left);
+          return { lineX, label, tagW, tagX, row: 0 };
+        })
+        .sort((a, b) => a.tagX - b.tagX);
+
+      // Assign rows: place each tag on the first row where it doesn't overlap
+      const rowEnds: number[] = []; // rightmost x used so far per row
+      items.forEach(item => {
+        let row = rowEnds.findIndex(end => end + GAP <= item.tagX);
+        if (row === -1) row = rowEnds.length;
+        item.row = row;
+        rowEnds[row] = item.tagX + item.tagW;
+      });
+
+      // Draw each tag on its assigned row
+      items.forEach(({ lineX, label, tagW, tagX, row }) => {
+        const rowY = tagY + row * (tagH + 2);
 
         svg.append("rect")
-          .attr("x", tagX).attr("y", tagY)
-          .attr("width", approxTextW + padX * 2).attr("height", tagH)
+          .attr("x", tagX).attr("y", rowY)
+          .attr("width", tagW).attr("height", tagH)
           .attr("rx", 3)
           .attr("fill", "#EF4444")
           .attr("pointer-events", "none");
 
         svg.append("text")
           .attr("x", tagX + padX)
-          .attr("y", tagY + padY)
+          .attr("y", rowY + padY)
           .attr("dominant-baseline", "hanging")
           .attr("fill", "#fff")
           .attr("font-size", `${fontSize}px`)
           .attr("font-weight", "700")
           .attr("pointer-events", "none")
           .text(label);
-      }
-    });
+      });
+    }
 
     // ── Stripe legend ─────────────────────────────────────────────────────────
     // Two items right-aligned: [swatch] Label   [swatch] Label
@@ -624,7 +674,7 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
       .attr("fill", "none").attr("stroke", "#9CA3AF").attr("stroke-width", 0.5);
 
     prevEventIdsRef.current = currentEventIds;
-  }, [layout, windowStart, windowEnd, dims, isDetail]);
+  }, [layout, windowStart, windowEnd, dims, isDetail, notableEvents, showNotableLabels, selectedEventId]);
 
   return (
     <div ref={containerRef} className="flex-1 overflow-hidden relative bg-white">

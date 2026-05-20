@@ -40,6 +40,9 @@ export default function App() {
   const [showOngoingTail, setShowOngoingTail] = useState(true);
   const [showNotableLabels, setShowNotableLabels] = useState(true);
   const [tooltipTransparent, setTooltipTransparent] = useState(false);
+  const [multiNotableSelect, setMultiNotableSelect] = useState(false);
+  const [unstackBars, setUnstackBars] = useState(false);
+  const [autoUnstackEnabled, setAutoUnstackEnabled] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
 
   useEffect(() => {
@@ -57,17 +60,30 @@ export default function App() {
     setGroupedEventIds(null);
     setSelectedEventId(id);
     setShowDetail(true);
-    const ev = events.find(e => e.id === id);
-    if (!ev) return;
-    const center = parseDate(ev.start_date);
-    const threeMonths = 90 * 24 * 60 * 60 * 1000;
-    setWindowStart(new Date(center.getTime() - threeMonths));
-    setWindowEnd(new Date(center.getTime() + threeMonths));
   }
 
   function handleEventDoubleClick(id: string) {
     const ev = events.find(e => e.id === id);
     if (ev) isolateRegion(ev.region);
+  }
+
+  function handleSearchResultClick(id: string) {
+    const ev = events.find(e => e.id === id);
+    if (!ev) return;
+
+    // Isolate region (same as double-tap)
+    isolateRegion(ev.region);
+
+    // Position start date ~15% from the left over a 180-day window
+    const DAY = 24 * 60 * 60 * 1000;
+    const startMs = parseDate(ev.start_date).getTime();
+    setWindowStart(new Date(startMs - 25 * DAY));
+    setWindowEnd(new Date(startMs + 155 * DAY));
+
+    // Select and open detail
+    setGroupedEventIds(null);
+    setSelectedEventId(id);
+    setShowDetail(true);
   }
 
   function handleGroupClick(ids: string[]) {
@@ -149,12 +165,18 @@ export default function App() {
 
   // Auto visibility level: fewer levels shown when window is wide (zoomed out)
   const windowDays = (effectiveWindowEnd.getTime() - effectiveWindowStart.getTime()) / 86_400_000;
-  const autoVisibilityLevel =
-    windowDays > 1095 ? 1 :
-    windowDays > 730  ? 2 :
-    windowDays > 365  ? 3 :
-    windowDays > 180  ? 4 :
-    windowDays > 90   ? 5 : 6;
+  // Bonus levels when fewer jurisdictions are active (log2: 8→+0, 4→+1, 2→+2, 1→+3)
+  const regionBonus = Math.floor(Math.log2(8 / Math.max(activeRegions.size, 1)));
+  const autoVisibilityLevel = Math.min(
+    (windowDays > 1095 ? 1 :
+     windowDays > 730  ? 2 :
+     windowDays > 365  ? 3 :
+     windowDays > 180  ? 4 :
+     windowDays > 90   ? 5 : 6) + regionBonus,
+    6
+  );
+
+  const effectiveUnstackBars = unstackBars || (autoUnstackEnabled && windowDays < 180);
 
   const effectiveVisibilityLevel = manualVisibilityLevel ?? autoVisibilityLevel;
 
@@ -258,16 +280,41 @@ export default function App() {
                 onToggleOngoingTail={() => setShowOngoingTail(v => !v)}
                 tooltipTransparent={tooltipTransparent}
                 onToggleTooltipTransparent={() => setTooltipTransparent(v => !v)}
+                unstackBars={unstackBars}
+                onToggleUnstackBars={() => setUnstackBars(v => !v)}
+                autoUnstackEnabled={autoUnstackEnabled}
+                onToggleAutoUnstack={() => setAutoUnstackEnabled(v => !v)}
                 onResetWindow={() => runIntroAnimation(fullStart.getTime(), fullEnd.getTime())}
                 notableEvents={notableEvents}
                 activeNotableEventIds={activeNotableEventIds}
-                onToggleNotableEvent={id => setActiveNotableEventIds(prev => {
-                  const next = new Set(prev);
-                  next.has(id) ? next.delete(id) : next.add(id);
-                  return next;
-                })}
+                onToggleNotableEvent={id => {
+                  if (multiNotableSelect) {
+                    setActiveNotableEventIds(prev => {
+                      const next = new Set(prev);
+                      next.has(id) ? next.delete(id) : next.add(id);
+                      return next;
+                    });
+                  } else {
+                    // Single-select: select only this one, or deselect if already the only one
+                    setActiveNotableEventIds(prev =>
+                      prev.size === 1 && prev.has(id) ? new Set() : new Set([id])
+                    );
+                  }
+                }}
                 onSelectAllNotableEvents={() => setActiveNotableEventIds(new Set(notableEvents.map(e => e.id)))}
                 onClearAllNotableEvents={() => setActiveNotableEventIds(new Set())}
+                multiNotableSelect={multiNotableSelect}
+                onSearchResultClick={handleSearchResultClick}
+                onToggleMultiNotableSelect={() => {
+                  setMultiNotableSelect(v => !v);
+                  // When switching back to single-select, keep at most one active
+                  if (multiNotableSelect) {
+                    setActiveNotableEventIds(prev => {
+                      const first = [...prev][0];
+                      return first !== undefined ? new Set([first]) : new Set();
+                    });
+                  }
+                }}
                 showNotableLabels={showNotableLabels}
                 onToggleNotableLabels={() => setShowNotableLabels(v => !v)}
               />
@@ -294,6 +341,8 @@ export default function App() {
             windowStart={effectiveWindowStart}
             windowEnd={effectiveWindowEnd}
             onWidthChange={handleTimelineWidthChange}
+            selectedEventId={selectedEventId}
+            unstackBars={effectiveUnstackBars}
             showOngoingTail={showOngoingTail}
             tooltipTransparent={tooltipTransparent}
             notableEvents={notableEvents.filter(e => activeNotableEventIds.has(e.id))}
@@ -369,28 +418,35 @@ export default function App() {
             <div className="mt-4">
               <h3 className="text-sm font-bold text-gray-800 mb-1.5">MandEval</h3>
               <p className="text-sm text-gray-600 leading-relaxed">
-                MandEval collected a structured dataset of COVID-19 vaccine mandate events so that researchers can compare how different policies developed across time and jurisdictions. This website turns that static dataset into an interactive public timeline that makes the key dates, jurisdictions, mandate types, and event details easier to explore.
+                MandEval collected a structured dataset of COVID-19 vaccine mandate events so that researchers can compare how different policies developed across time and jurisdictions. This website turns that dataset into an interactive public timeline, making key dates, jurisdictions, mandate types, and policy details easier to explore.
               </p>
             </div>
 
             <div className="mt-4">
               <h3 className="text-sm font-bold text-gray-800 mb-1.5">How to use</h3>
               <p className="text-sm text-gray-600 leading-relaxed">
-                Use the minimap at the bottom to pan and zoom the timeline window. Click any mandate bar to open its detail panel. The filter bar on the left lets you narrow by jurisdiction, mandate event type, category, and visibility level. Double-click a bar to isolate that jurisdiction.
+                Use the minimap at the bottom to pan and zoom the timeline window. Click any mandate bar to open its detail panel on the right. Use the +/− buttons in the filter bar to control how many events are shown at once. The filter bar also lets you narrow by jurisdiction, mandate type, and category. Double-click a bar to isolate that jurisdiction, and use the search in the Experimental section to find specific mandates by name.
               </p>
             </div>
 
             <div className="mt-4">
               <h3 className="text-sm font-bold text-gray-800 mb-1.5">Reading the bars</h3>
               <p className="text-sm text-gray-600 leading-relaxed">
-                The striped portion of a bar represents the announcement-to-enforcement lead period. The solid portion is the active enforcement period. A dashed outline indicates an uncertain date. Bars that fade at the right edge are ongoing mandates with no recorded end date.
+                The striped portion of a bar represents the announcement-to-enforcement lead period. The solid portion is the active enforcement period. A dashed outline indicates an uncertain date. Bars that fade at the right edge are ongoing mandates with no confirmed end date. A ×N badge means multiple overlapping mandates have been grouped — click to expand them.
               </p>
             </div>
 
             <div className="mt-4">
               <h3 className="text-sm font-bold text-gray-800 mb-1.5">Project team</h3>
               <p className="text-sm text-gray-600 leading-relaxed">
-                This interactive tool was built as part of a CITS5551 engineering design project at The University of Western Australia by Zhiheng Zhou, Zijun Zhou, Joel Fitzpatrick, Jiaren Zhu, and Yupeng Sun. The site was designed to support public viewing, client handover, and later hosting on client or university infrastructure.
+                This interactive tool was built as part of a CITS5551 engineering design project at The University of Western Australia by Zhiheng Zhou, Zijun Zhou, Joel Fitzpatrick, Jiaren Zhu, and Yupeng Sun. It was designed for public access and long-term hosting.
+              </p>
+            </div>
+
+            <div className="mt-4 rounded-lg bg-gray-50 border border-gray-200 p-3">
+              <h3 className="text-sm font-bold text-gray-700 mb-1.5">A note on the data</h3>
+              <p className="text-sm text-gray-500 leading-relaxed">
+                The underlying dataset was collected from publicly available sources by the MandEval research team. Some end dates are estimated where an exact date wasn't recorded, and mandates still active at the time of collection appear as ongoing. As with any research dataset, some entries may be incomplete or approximate.
               </p>
             </div>
           </div>

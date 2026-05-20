@@ -30,6 +30,10 @@ interface Props {
   onToggleOngoingTail: () => void;
   tooltipTransparent: boolean;
   onToggleTooltipTransparent: () => void;
+  unstackBars: boolean;
+  onToggleUnstackBars: () => void;
+  autoUnstackEnabled: boolean;
+  onToggleAutoUnstack: () => void;
   onResetWindow: () => void;
   notableEvents: NotableEvent[];
   activeNotableEventIds: Set<number>;
@@ -38,6 +42,9 @@ interface Props {
   onClearAllNotableEvents: () => void;
   showNotableLabels: boolean;
   onToggleNotableLabels: () => void;
+  multiNotableSelect: boolean;
+  onToggleMultiNotableSelect: () => void;
+  onSearchResultClick: (id: string) => void;
 }
 
 function toInputValue(d: Date): string {
@@ -70,6 +77,10 @@ export function FilterBar({
   onToggleOngoingTail,
   tooltipTransparent,
   onToggleTooltipTransparent,
+  unstackBars,
+  onToggleUnstackBars,
+  autoUnstackEnabled,
+  onToggleAutoUnstack,
   onResetWindow,
   notableEvents,
   activeNotableEventIds,
@@ -78,8 +89,24 @@ export function FilterBar({
   onClearAllNotableEvents,
   showNotableLabels,
   onToggleNotableLabels,
+  multiNotableSelect,
+  onToggleMultiNotableSelect,
+  onSearchResultClick,
 }: Props) {
   const [categoryMode, setCategoryMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<{ id: string; jurisdiction: string; name: string | null; type: string | null; snippet: string | null }[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+
+  function handleSearch(q: string) {
+    setSearchQuery(q);
+    if (!q.trim()) { setSearchResults([]); return; }
+    setSearchLoading(true);
+    fetch(`/api/search?q=${encodeURIComponent(q.trim())}`)
+      .then(r => r.json())
+      .then(data => { setSearchResults(data.results ?? []); setSearchLoading(false); })
+      .catch(() => setSearchLoading(false));
+  }
 
   function enterCategoryMode() {
     onEnterCategoryMode();
@@ -157,6 +184,12 @@ export function FilterBar({
                 onWindowChange(new Date(center - half), new Date(center + half));
               }
 
+              function formatWindowSize(days: number): string {
+                if (days >= 365 * 1.5) return `${Math.round(days / 365)}y`;
+                if (days >= 60) return `${Math.round(days / 30)}mo`;
+                return `${Math.round(days)}d`;
+              }
+
               return (
                 <>
                   <button
@@ -165,7 +198,7 @@ export function FilterBar({
                     className="w-7 h-7 flex items-center justify-center rounded border border-gray-300 text-gray-600 text-base hover:border-blue-400 hover:text-blue-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                     title="Zoom out (fewer events)"
                   >−</button>
-                  <span className="text-xs text-gray-400">Level {currentLevel}</span>
+                  <span className="text-xs text-gray-400">{formatWindowSize(windowDays)}</span>
                   <button
                     onClick={() => stepTo(Math.min(currentLevel + 1, 6))}
                     disabled={currentLevel >= 6}
@@ -327,52 +360,17 @@ export function FilterBar({
         )}
       </div>
 
-      {/* Display options */}
-      <div>
-        <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Experimental</p>
-        <div className="flex flex-col gap-2">
-          <label className="flex items-center justify-between cursor-pointer select-none">
-            <span className="text-sm text-gray-600">Ongoing tail</span>
-            <button
-              onClick={onToggleOngoingTail}
-              className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
-                showOngoingTail ? "bg-indigo-600" : "bg-gray-300"
-              }`}
-              role="switch"
-              aria-checked={showOngoingTail}
-            >
-              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-                showOngoingTail ? "translate-x-4" : "translate-x-1"
-              }`} />
-            </button>
-          </label>
-          <label className="flex items-center justify-between cursor-pointer select-none">
-            <span className="text-sm text-gray-600">Transparent tooltip</span>
-            <button
-              onClick={onToggleTooltipTransparent}
-              className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
-                tooltipTransparent ? "bg-indigo-600" : "bg-gray-300"
-              }`}
-              role="switch"
-              aria-checked={tooltipTransparent}
-            >
-              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-                tooltipTransparent ? "translate-x-4" : "translate-x-1"
-              }`} />
-            </button>
-          </label>
-        </div>
-      </div>
-
       {/* Notable Events */}
       {notableEvents.length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Notable Events</p>
-            <div className="flex gap-2">
-              <button onClick={onSelectAllNotableEvents} className="text-xs text-blue-500 hover:underline">All</button>
-              <button onClick={onClearAllNotableEvents} className="text-xs text-blue-500 hover:underline">Clear</button>
-            </div>
+            {multiNotableSelect && (
+              <div className="flex gap-2">
+                <button onClick={onSelectAllNotableEvents} className="text-xs text-blue-500 hover:underline">All</button>
+                <button onClick={onClearAllNotableEvents} className="text-xs text-blue-500 hover:underline">Clear</button>
+              </div>
+            )}
           </div>
           <div className="flex flex-col gap-1.5">
             {notableEvents.map(ev => {
@@ -388,14 +386,36 @@ export function FilterBar({
                       : "bg-white text-gray-500 border-gray-300 hover:border-red-300 hover:text-red-500"
                   }`}
                 >
-                  <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 mb-px ${active ? "bg-red-500" : "bg-gray-300"}`} />
+                  <span className={`inline-block w-2 h-2 rounded-full border mr-1.5 mb-px flex-shrink-0 ${
+                    active
+                      ? "bg-red-500 border-red-500"
+                      : multiNotableSelect
+                        ? "bg-gray-200 border-gray-300"
+                        : "bg-white border-gray-400"
+                  }`} />
                   {ev.title}
                   {ev.date_approximate && <span className="ml-1 opacity-60 text-[10px]">~</span>}
                 </button>
               );
             })}
           </div>
-          <label className="flex items-center justify-between cursor-pointer select-none mt-2">
+          <div className="flex flex-col gap-1.5 mt-2">
+          <label className="flex items-center justify-between cursor-pointer select-none">
+            <span className="text-xs text-gray-500">Multiple selection</span>
+            <button
+              onClick={onToggleMultiNotableSelect}
+              className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
+                multiNotableSelect ? "bg-red-500" : "bg-gray-300"
+              }`}
+              role="switch"
+              aria-checked={multiNotableSelect}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                multiNotableSelect ? "translate-x-4" : "translate-x-1"
+              }`} />
+            </button>
+          </label>
+          <label className="flex items-center justify-between cursor-pointer select-none">
             <span className="text-xs text-gray-500">Show labels</span>
             <button
               onClick={onToggleNotableLabels}
@@ -410,8 +430,105 @@ export function FilterBar({
               }`} />
             </button>
           </label>
+          </div>
         </div>
       )}
+
+      {/* Experimental */}
+      <div>
+        <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Experimental</p>
+        <div className="flex flex-col gap-3">
+
+          {/* Search */}
+          <div>
+            <p className="text-xs text-gray-400 mb-1.5">Search mandates</p>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => handleSearch(e.target.value)}
+              placeholder="Keyword…"
+              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-700 focus:outline-none focus:border-indigo-400"
+            />
+            {searchQuery.trim() && (
+              <div className="mt-1.5 flex flex-col gap-1 max-h-48 overflow-y-auto">
+                {searchLoading && <p className="text-xs text-gray-400 px-1">Searching…</p>}
+                {!searchLoading && searchResults.length === 0 && (
+                  <p className="text-xs text-gray-400 px-1">No results</p>
+                )}
+                {searchResults.map(r => (
+                  <button
+                    key={r.id}
+                    onClick={() => onSearchResultClick(r.id)}
+                    className="text-left px-2 py-1.5 rounded border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 transition-colors"
+                  >
+                    <p className="text-xs font-semibold text-gray-700 leading-snug">{r.name ?? r.id}</p>
+                    <p className="text-[10px] text-gray-400">{r.jurisdiction} · {r.type}</p>
+                    {r.snippet && <p className="text-[10px] text-gray-500 mt-0.5 leading-snug italic">…{r.snippet}…</p>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Toggles */}
+          <label className="flex items-center justify-between cursor-pointer select-none">
+            <span className="text-sm text-gray-600">Ongoing tail</span>
+            <button
+              onClick={onToggleOngoingTail}
+              className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
+                showOngoingTail ? "bg-indigo-600" : "bg-gray-300"
+              }`}
+              role="switch" aria-checked={showOngoingTail}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                showOngoingTail ? "translate-x-4" : "translate-x-1"
+              }`} />
+            </button>
+          </label>
+          <label className="flex items-center justify-between cursor-pointer select-none">
+            <span className="text-sm text-gray-600">Unstack bars</span>
+            <button
+              onClick={onToggleUnstackBars}
+              className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
+                unstackBars ? "bg-indigo-600" : "bg-gray-300"
+              }`}
+              role="switch" aria-checked={unstackBars}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                unstackBars ? "translate-x-4" : "translate-x-1"
+              }`} />
+            </button>
+          </label>
+          <label className="flex items-center justify-between cursor-pointer select-none">
+            <span className="text-sm text-gray-600">Auto unstack on zoom</span>
+            <button
+              onClick={onToggleAutoUnstack}
+              className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
+                autoUnstackEnabled ? "bg-indigo-600" : "bg-gray-300"
+              }`}
+              role="switch" aria-checked={autoUnstackEnabled}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                autoUnstackEnabled ? "translate-x-4" : "translate-x-1"
+              }`} />
+            </button>
+          </label>
+          <label className="flex items-center justify-between cursor-pointer select-none">
+            <span className="text-sm text-gray-600">Transparent tooltip</span>
+            <button
+              onClick={onToggleTooltipTransparent}
+              className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
+                tooltipTransparent ? "bg-indigo-600" : "bg-gray-300"
+              }`}
+              role="switch" aria-checked={tooltipTransparent}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                tooltipTransparent ? "translate-x-4" : "translate-x-1"
+              }`} />
+            </button>
+          </label>
+        </div>
+      </div>
 
       <p className="text-xs text-gray-400 leading-relaxed mt-auto">
         Jurisdiction colours are consistent across the timeline. Use the top bar to hide either panel for a wider view.
