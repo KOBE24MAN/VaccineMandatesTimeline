@@ -62,12 +62,15 @@ class MandateSummary(BaseModel):
     jurisdiction: str
     name: Optional[str] = None
     type: Optional[str] = None
+    target: Optional[str] = None
     target_category: Optional[str] = None
     effective_date: Optional[str] = None
     enforcement_date: Optional[str] = None
     removal_date: Optional[str] = None
     duration_days: Optional[int] = None
     date_uncertain: bool = False
+    ongoing: bool = False
+    visibility_level: Optional[int] = None
 
 
 class MandateDetail(BaseModel):
@@ -126,6 +129,16 @@ class FiltersResponse(BaseModel):
     categories: list[str]
 
 
+class NotableEventResponse(BaseModel):
+    id: int
+    event_date: str
+    date_end: Optional[str] = None
+    date_approximate: bool
+    title: str
+    description: Optional[str] = None
+    source: Optional[str] = None
+
+
 class HealthResponse(BaseModel):
     status: str
     database: str
@@ -139,6 +152,7 @@ class HealthResponse(BaseModel):
 def row_to_summary(row) -> dict:
     d = dict(row)
     d["date_uncertain"] = bool(d.get("date_uncertain", 0))
+    d["ongoing"] = bool(d.get("ongoing", 0))
     return d
 
 
@@ -153,76 +167,18 @@ def row_to_detail(row) -> dict:
 # ---------------------------------------------------------------------------
 
 @app.get("/api/mandates", response_model=MandateListResponse)
-def list_mandates(
-    jurisdiction: Optional[str] = Query(None, description="Comma-separated jurisdictions, e.g. WA,NSW"),
-    type: Optional[str] = Query(None, description="Employment or Public Space"),
-    category: Optional[str] = Query(None, description="Comma-separated categories, e.g. healthcare,education"),
-    start_date: Optional[str] = Query(None, description="Window start YYYY-MM-DD"),
-    end_date: Optional[str] = Query(None, description="Window end YYYY-MM-DD"),
-    search: Optional[str] = Query(None, description="Keyword search in name and target"),
-):
-    """
-    List mandates with optional filters.
-    Date filtering uses an "active window" approach: returns mandates that were
-    active at any point during [start_date, end_date].
-    """
-    conditions = []
-    params = []
-
-    # Jurisdiction filter
-    if jurisdiction:
-        jurisdictions = [j.strip() for j in jurisdiction.split(",") if j.strip()]
-        placeholders = ",".join("?" * len(jurisdictions))
-        conditions.append(f"m.jurisdiction IN ({placeholders})")
-        params.extend(jurisdictions)
-
-    # Type filter
-    if type:
-        conditions.append("m.type = ?")
-        params.append(type)
-
-    # Category filter via junction table
-    if category:
-        categories = [c.strip() for c in category.split(",") if c.strip()]
-        placeholders = ",".join("?" * len(categories))
-        conditions.append(f"m.id IN (SELECT mandate_id FROM mandate_categories WHERE category IN ({placeholders}))")
-        params.extend(categories)
-
-    # Date window filter: mandate is active if effective_date <= end AND (removal_date >= start OR removal_date IS NULL)
-    if start_date and end_date:
-        conditions.append("""
-            (
-                (m.effective_date <= ? AND (m.removal_date >= ? OR m.removal_date IS NULL))
-                OR (m.effective_date IS NULL AND m.removal_date IS NOT NULL AND m.removal_date >= ?)
-            )
-        """)
-        params.extend([end_date, start_date, start_date])
-    elif start_date:
-        conditions.append("(m.removal_date >= ? OR m.removal_date IS NULL)")
-        params.append(start_date)
-    elif end_date:
-        conditions.append("(m.effective_date <= ? OR m.effective_date IS NULL)")
-        params.append(end_date)
-
-    # Keyword search
-    if search:
-        conditions.append("(m.name LIKE ? OR m.target LIKE ?)")
-        term = f"%{search}%"
-        params.extend([term, term])
-
-    where = " AND ".join(conditions) if conditions else "1=1"
-
-    query = f"""
-        SELECT m.id, m.jurisdiction, m.name, m.type, m.target_category,
+def list_mandates():
+    """Return all mandates. Filtering is handled client-side."""
+    query = """
+        SELECT m.id, m.jurisdiction, m.name, m.type, m.target, m.target_category,
                m.effective_date, m.enforcement_date, m.removal_date,
-               m.duration_days, m.date_uncertain
+               m.duration_days, m.date_uncertain, m.ongoing, m.visibility_level
         FROM mandates m
-        WHERE {where}
         ORDER BY m.effective_date ASC, m.jurisdiction ASC
     """
 
     with get_db() as conn:
-        rows = conn.execute(query, params).fetchall()
+        rows = conn.execute(query).fetchall()
         mandates = [row_to_summary(r) for r in rows]
 
     logger.info(f"GET /api/mandates -> {len(mandates)} results")
@@ -356,6 +312,25 @@ def get_filters():
         "types": types,
         "categories": categories,
     }
+
+
+@app.get("/api/notable-events", response_model=list[NotableEventResponse])
+def list_notable_events():
+    """Return all notable historical events for timeline overlay."""
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM notable_events ORDER BY event_date").fetchall()
+    return [
+        {
+            "id": r["id"],
+            "event_date": r["event_date"],
+            "date_end": r["date_end"],
+            "date_approximate": bool(r["date_approximate"]),
+            "title": r["title"],
+            "description": r["description"],
+            "source": r["source"],
+        }
+        for r in rows
+    ]
 
 
 @app.get("/health", response_model=HealthResponse)
