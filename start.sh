@@ -31,7 +31,6 @@ FRONTEND_PID=$!
 
 # ── Open prototype HTML ───────────────────────────────────────────────────────
 echo "Opening prototype..."
-open HomePage2.4_client.html
 
 # ── Ready ─────────────────────────────────────────────────────────────────────
 echo ""
