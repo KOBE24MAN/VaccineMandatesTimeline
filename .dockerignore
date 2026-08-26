@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+.env
+.acceptance
+.pytest_cache
+.pytest_tmp
+runtime
+__pycache__
+*.db
+!data/release/mandates.db
+*.pyc
+*.xlsx
+frontend_client/node_modules
+frontend_client/dist
+tests

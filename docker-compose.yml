@@ -1,0 +1,50 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mandeval
+      POSTGRES_USER: mandeval
+      POSTGRES_PASSWORD: mandeval
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mandeval -d mandeval"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  db-init:
+    build: .
+    command: ["python", "scripts/init_database.py", "--replace"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://mandeval:mandeval@db:5432/mandeval
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://mandeval:mandeval@db:5432/mandeval
+      ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+    ports:
+      - "8000:8000"
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

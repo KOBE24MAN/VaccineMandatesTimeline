@@ -1,0 +1,31 @@
+services:
+  demo:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+    image: mandeval-demo:local
+    container_name: mandeval-demo
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: production
+      LOG_LEVEL: INFO
+      ALLOWED_ORIGINS: http://localhost:8000,http://127.0.0.1:8000
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped

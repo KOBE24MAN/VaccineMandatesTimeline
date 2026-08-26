@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS mandates (
     removal_details TEXT,                   -- Removal details (long text)
     authority TEXT,                         -- Issuing authority
     mandate_communications TEXT,            -- Communication methods
-    ref_code TEXT                           -- Reference code
+    ref_code TEXT,                          -- Reference code
+    ongoing INTEGER NOT NULL DEFAULT 0,     -- Whether the policy is still active 0/1
+    visibility_level INTEGER                -- Frontend density level (1-6)
 );
 
 -- Category junction table for efficient category-based queries
@@ -38,3 +40,14 @@ CREATE INDEX IF NOT EXISTS idx_mandates_type ON mandates(type);
 CREATE INDEX IF NOT EXISTS idx_mandates_effective_date ON mandates(effective_date);
 CREATE INDEX IF NOT EXISTS idx_mandates_removal_date ON mandates(removal_date);
 CREATE INDEX IF NOT EXISTS idx_mandate_categories_category ON mandate_categories(category);
+
+-- Curated contextual events displayed above the mandate timeline
+CREATE TABLE IF NOT EXISTS notable_events (
+    id INTEGER PRIMARY KEY,
+    event_date TEXT NOT NULL,
+    date_end TEXT,
+    date_approximate INTEGER NOT NULL DEFAULT 0,
+    title TEXT NOT NULL,
+    description TEXT,
+    source TEXT
+);

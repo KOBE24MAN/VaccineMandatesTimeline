@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useMemo } from "react";
 import * as d3 from "d3";
-import type { EventIndex, Region, EventType, NotableEvent } from "../types/event";
+import type { EventIndex, Region, NotableEvent } from "../types/event";
 import { ALL_REGIONS } from "../types/event";
 import { parseDate, yearsBetween } from "../utils/dates";
 
@@ -89,7 +89,6 @@ interface TooltipState { x: number; y: number; event: EventIndex }
 interface Props {
   events: EventIndex[];
   activeRegions: Set<Region>;
-  activeTypes: Set<EventType>;
   onEventClick: (id: string) => void;
   onEventDoubleClick?: (id: string) => void;
   onGroupClick: (ids: string[]) => void;
@@ -104,7 +103,7 @@ interface Props {
   unstackBars?: boolean;
 }
 
-export function Timeline({ events, activeRegions, activeTypes, onEventClick, onEventDoubleClick, onGroupClick, windowStart, windowEnd, onWidthChange, showOngoingTail = true, notableEvents = [], showNotableLabels = true, tooltipTransparent = false, selectedEventId = null, unstackBars = false }: Props) {
+export function Timeline({ events, activeRegions, onEventClick, onEventDoubleClick, onGroupClick, windowStart, windowEnd, onWidthChange, showOngoingTail = true, notableEvents = [], showNotableLabels = true, tooltipTransparent = false, selectedEventId = null, unstackBars = false }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef       = useRef<SVGSVGElement>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
@@ -184,7 +183,7 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
       .domain([windowStart, windowEnd])
       .range([MARGIN.left, MARGIN.left + innerW]);
 
-    const { visibleRegions, dedupedEvents, byRegion, lanesPerRegion, laneCountPerRegion } = layout;
+    const { visibleRegions, byRegion, lanesPerRegion, laneCountPerRegion } = layout;
 
     // Each region row gets height proportional to its lane count so bars
     // fill the available space equally regardless of how many lanes there are.
@@ -605,7 +604,7 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
       });
 
       // Draw each tag on its assigned row
-      items.forEach(({ lineX, label, tagW, tagX, row }) => {
+      items.forEach(({ label, tagW, tagX, row }) => {
         const rowY = tagY + row * (tagH + 2);
 
         svg.append("rect")
@@ -674,7 +673,7 @@ export function Timeline({ events, activeRegions, activeTypes, onEventClick, onE
       .attr("fill", "none").attr("stroke", "#9CA3AF").attr("stroke-width", 0.5);
 
     prevEventIdsRef.current = currentEventIds;
-  }, [layout, windowStart, windowEnd, dims, isDetail, notableEvents, showNotableLabels, selectedEventId]);
+  }, [layout, windowStart, windowEnd, dims, isDetail, notableEvents, showNotableLabels, showOngoingTail, selectedEventId]);
 
   return (
     <div ref={containerRef} className="flex-1 overflow-hidden relative bg-white">

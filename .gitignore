@@ -1,4 +1,5 @@
 __pycache__/
+runtime/
 *.py[cod]
 *$py.class
 *.so
@@ -6,6 +7,9 @@ __pycache__/
 env/
 venv/
 .env
+.acceptance/
+.pytest_cache/
+.pytest_tmp/
 *.egg-info/
 dist/
 build/
@@ -15,3 +19,6 @@ build/
 *.swo
 ~$*
 .DS_Store
+frontend_client/node_modules/
+frontend_client/dist/
+frontend_client/.npm-cache/

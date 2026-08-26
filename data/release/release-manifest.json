@@ -1,0 +1,70 @@
+{
+  "manifest_version": 1,
+  "release_version": "demo-2026-08-26",
+  "source": {
+    "file_name": "all_mandates.xlsx",
+    "sha256": "f86183c4ade352cf69af80ab400a85163c014c9b8363987e50e0a87d6999e6e3",
+    "records": 279
+  },
+  "inputs": {
+    "visibility_seed_sha256": "fb8993f6e31e4cb2994766f7803862462acc2d800d1a061f6362bd6a5a24ba65",
+    "notable_events_sha256": "e0d94910d4c5847c10ad18a2ad14f542d2b8a7bd7f73d2a83ad641e50c387bae"
+  },
+  "outputs": {
+    "mandates_csv": {
+      "file_name": "mandates.csv",
+      "sha256": "99344e2b557870b829314fb4b72ec8f22552d2c4247cef3be6204dbf1d072d04"
+    },
+    "mandates_database": {
+      "file_name": "mandates.db",
+      "sha256": "fbad6ebcee99520791e828e2e701bb55276510dc14f99a5f0d55752d653609ee"
+    }
+  },
+  "validation": {
+    "records": 279,
+    "distinct_ids": 279,
+    "date_uncertain": 3,
+    "ongoing": 0,
+    "notable_events": 5,
+    "category_links": 341,
+    "date_range": {
+      "earliest": "2020-03-28",
+      "latest": "2024-10-04"
+    },
+    "by_jurisdiction": {
+      "ACT": 8,
+      "NSW": 45,
+      "NT": 20,
+      "QLD": 29,
+      "SA": 19,
+      "TAS": 16,
+      "VIC": 86,
+      "WA": 56
+    },
+    "date_uncertain_ids": [
+      "VIC-086",
+      "WA-032",
+      "WA-052"
+    ],
+    "negative_duration_ids": [
+      "WA-032"
+    ],
+    "missing_start_date_ids": [
+      "VIC-086",
+      "WA-052"
+    ],
+    "visibility_levels": {
+      "1": 34,
+      "2": 38,
+      "3": 55,
+      "4": 102,
+      "5": 26,
+      "6": 24
+    },
+    "database_insert_counts": {
+      "mandates": 279,
+      "categories": 341,
+      "events": 5
+    }
+  }
+}

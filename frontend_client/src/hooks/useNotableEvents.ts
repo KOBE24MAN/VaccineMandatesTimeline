@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import type { NotableEvent } from "../types/event";
+import { fetchJson } from "../api/client";
 
 function resolveDisplayDate(event_date: string, date_end: string | null, date_approximate: boolean): string {
   if (!date_approximate || !date_end) return event_date;
@@ -12,8 +13,7 @@ export function useNotableEvents(): NotableEvent[] {
   const [events, setEvents] = useState<NotableEvent[]>([]);
 
   useEffect(() => {
-    fetch("/api/notable-events")
-      .then(res => res.json())
+    fetchJson<Omit<NotableEvent, "display_date">[]>("/api/notable-events")
       .then((data: Omit<NotableEvent, "display_date">[]) => {
         setEvents(data.map(e => ({
           ...e,

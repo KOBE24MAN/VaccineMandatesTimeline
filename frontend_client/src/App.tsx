@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import { useEvents } from "./hooks/useEvents";
 import { useFilters } from "./hooks/useFilters";
@@ -11,7 +11,7 @@ import { GroupPanel } from "./components/GroupPanel";
 import { parseDate } from "./utils/dates";
 
 export default function App() {
-  const { events, loading, error, fetchDetail } = useEvents();
+  const { events, totalRecords, loading, error, fetchDetail } = useEvents();
   const notableEvents = useNotableEvents();
   const [activeNotableEventIds, setActiveNotableEventIds] = useState<Set<number>>(new Set());
   const {
@@ -69,7 +69,12 @@ export default function App() {
 
   function handleSearchResultClick(id: string) {
     const ev = events.find(e => e.id === id);
-    if (!ev) return;
+    if (!ev) {
+      setGroupedEventIds(null);
+      setSelectedEventId(id);
+      setShowDetail(true);
+      return;
+    }
 
     // Isolate region (same as double-tap)
     isolateRegion(ev.region);
@@ -119,7 +124,7 @@ export default function App() {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   }
 
-  function runIntroAnimation(fromStart: number, fromEnd: number) {
+  const runIntroAnimation = useCallback((fromStart: number, fromEnd: number) => {
     const targetStart = new Date("2021-06-01");
     const targetEnd   = new Date("2022-12-01");
     const duration    = 1800;
@@ -134,7 +139,7 @@ export default function App() {
     }
 
     requestAnimationFrame(frame);
-  }
+  }, []);
 
   // Intro zoom: once events load, animate from full extent → 1-year target window
   const hasAnimated = useRef(false);
@@ -142,7 +147,7 @@ export default function App() {
     if (hasAnimated.current || events.length === 0) return;
     hasAnimated.current = true;
     runIntroAnimation(fullStart.getTime(), fullEnd.getTime());
-  }, [events.length, fullStart, fullEnd]);
+  }, [events.length, fullStart, fullEnd, runIntroAnimation]);
 
   const effectiveWindowStart = windowStart ?? fullStart;
   const effectiveWindowEnd = windowEnd ?? fullEnd;
@@ -238,7 +243,8 @@ export default function App() {
         </div>
         <span className="text-xs text-gray-400">
           Showing <span className="font-semibold text-gray-600">{visibleEvents.length}</span> of{" "}
-          <span className="font-semibold text-gray-600">{events.length}</span> mandates
+          <span className="font-semibold text-gray-600">{events.length}</span> dated mandates ·{" "}
+          <span className="font-semibold text-gray-600">{totalRecords}</span> records total
         </span>
       </header>
 
@@ -334,7 +340,6 @@ export default function App() {
           <Timeline
             events={visibleEvents}
             activeRegions={activeRegions}
-            activeTypes={activeTypes}
             onEventClick={handleEventClick}
             onEventDoubleClick={handleEventDoubleClick}
             onGroupClick={handleGroupClick}

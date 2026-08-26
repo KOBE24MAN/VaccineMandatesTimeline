@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import type { EventIndex, EventDetail, Region, EventType } from "../types/event";
+import { fetchJson } from "../api/client";
 
 interface UseEventsReturn {
   events: EventIndex[];
+  totalRecords: number;
   loading: boolean;
   error: string | null;
   fetchDetail: (id: string) => Promise<EventDetail>;
@@ -79,20 +81,18 @@ function mapToDetail(m: ApiMandateDetail): EventDetail {
  */
 export function useEvents(): UseEventsReturn {
   const [events, setEvents] = useState<EventIndex[]>([]);
+  const [totalRecords, setTotalRecords] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    fetch("/api/mandates")
-      .then((res) => {
-        if (!res.ok) throw new Error(`Server error: ${res.status}`);
-        return res.json() as Promise<{ count: number; mandates: ApiMandate[] }>;
-      })
-      .then(({ mandates }) => {
+    fetchJson<{ count: number; mandates: ApiMandate[] }>("/api/mandates")
+      .then(({ count, mandates }) => {
         if (!cancelled) {
           setEvents(mandates.filter(m => m.effective_date || m.enforcement_date).map(mapToIndex));
+          setTotalRecords(count);
           setLoading(false);
         }
       })
@@ -109,11 +109,9 @@ export function useEvents(): UseEventsReturn {
   }, []);
 
   async function fetchDetail(id: string): Promise<EventDetail> {
-    const res = await fetch(`/api/mandates/${id}`);
-    if (!res.ok) throw new Error(`Failed to load mandate ${id}`);
-    const data = await res.json() as ApiMandateDetail;
+    const data = await fetchJson<ApiMandateDetail>(`/api/mandates/${id}`);
     return mapToDetail(data);
   }
 
-  return { events, loading, error, fetchDetail };
+  return { events, totalRecords, loading, error, fetchDetail };
 }

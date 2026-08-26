@@ -2,6 +2,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Region, EventType, Category, NotableEvent } from "../types/event";
 import { ALL_REGIONS, ALL_EVENT_TYPES, ALL_CATEGORIES } from "../types/event";
+import { fetchJson } from "../api/client";
 import { REGION_COLOR } from "./Timeline";
 
 interface Props {
@@ -102,8 +103,7 @@ export function FilterBar({
     setSearchQuery(q);
     if (!q.trim()) { setSearchResults([]); return; }
     setSearchLoading(true);
-    fetch(`/api/search?q=${encodeURIComponent(q.trim())}`)
-      .then(r => r.json())
+    fetchJson<{ results: typeof searchResults }>(`/api/search?q=${encodeURIComponent(q.trim())}`)
       .then(data => { setSearchResults(data.results ?? []); setSearchLoading(false); })
       .catch(() => setSearchLoading(false));
   }

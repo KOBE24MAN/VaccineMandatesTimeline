@@ -1,0 +1,94 @@
+name: Build Azure Demo Image
+
+on:
+  push:
+    branches:
+      - zijun-branch
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the immutable demo image
+        run: |
+          docker build \
+            --file Dockerfile.demo \
+            --tag "mandeval-demo:${GITHUB_SHA}" \
+            .
+
+      - name: Run container acceptance checks
+        run: |
+          set -euo pipefail
+          docker run \
+            --detach \
+            --name mandeval-acceptance \
+            --read-only \
+            --tmpfs /tmp \
+            --security-opt no-new-privileges:true \
+            --publish 8000:8000 \
+            "mandeval-demo:${GITHUB_SHA}"
+          trap 'docker rm --force mandeval-acceptance >/dev/null 2>&1 || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/health/ready > ready.json; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs mandeval-acceptance
+              exit 1
+            fi
+            sleep 2
+          done
+
+          test "$(jq -r '.status' ready.json)" = "ok"
+          test "$(jq -r '.records' ready.json)" = "279"
+          test "$(curl --fail --silent 'http://127.0.0.1:8000/api/mandates' | jq -r '.total')" = "279"
+          test "$(curl --fail --silent 'http://127.0.0.1:8000/api/notable-events' | jq 'length')" = "5"
+          test "$(curl --fail --silent 'http://127.0.0.1:8000/api/search?q=health' | jq -r '.count')" -gt "0"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' 'http://127.0.0.1:8000/api/not-a-route')" = "404"
+          test "$(docker inspect --format '{{.Config.User}}' mandeval-acceptance)" = "app"
+          test "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' mandeval-acceptance)" = "true"
+
+          if docker exec mandeval-acceptance python -c "import sqlite3; connection = sqlite3.connect('file:/app/data/mandates.db?mode=ro', uri=True); connection.execute('CREATE TABLE should_fail (id INTEGER)')"; then
+            echo "[ERROR] The release database accepted a write."
+            exit 1
+          fi
+
+          if docker run --rm "mandeval-demo:${GITHUB_SHA}" sh -c "find /app -type f \( -name '*.xlsx' -o -name '*.csv' \) | grep -q ."; then
+            echo "[ERROR] Source spreadsheet data was found in the runtime image."
+            exit 1
+          fi
+
+          docker restart mandeval-acceptance >/dev/null
+          for attempt in $(seq 1 20); do
+            if test "$(curl --fail --silent http://127.0.0.1:8000/health/ready | jq -r '.records')" = "279"; then
+              break
+            fi
+            if [ "$attempt" -eq 20 ]; then
+              docker logs mandeval-acceptance
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Export the verified image
+        run: |
+          docker save --output mandeval-demo.tar "mandeval-demo:${GITHUB_SHA}"
+          sha256sum mandeval-demo.tar > mandeval-demo.tar.sha256
+
+      - name: Upload the verified image
+        uses: actions/upload-artifact@v4
+        with:
+          name: mandeval-image-${{ github.sha }}
+          path: |
+            mandeval-demo.tar
+            mandeval-demo.tar.sha256
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: error
