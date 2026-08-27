@@ -22,7 +22,7 @@ The demo uses one container. A React production build is served by FastAPI, and 
 - Image digest: `sha256:c70f3481e3d821da20c793e0097448b37d51fb2a4b86a4c447f24c5fa07d7898`
 - Managed identity: `mandeval-pull-identity`
 
-The app uses 0.25 CPU and 0.5 GiB memory with one minimum and one maximum replica. Registry admin access remains disabled; the Container App pulls the image through the managed identity.
+The app uses 0.25 CPU and 0.5 GiB memory with zero minimum and one maximum replica. Registry admin access remains disabled; the Container App pulls the image through the managed identity.
 
 ## Local Operation
 
@@ -59,7 +59,7 @@ For a manual update:
 
 ## Cost Control
 
-The app currently keeps one replica ready for the scheduled demonstration. After the demonstration period, the team can set the minimum replica count to zero to reduce idle consumption, accepting a possible cold-start delay.
+The app currently scales to zero replicas when idle. This minimizes Container Apps compute consumption but can add a short cold-start delay to the first request. The Basic container registry continues to incur its daily charge while retained.
 
 ## Recovery
 

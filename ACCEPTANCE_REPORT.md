@@ -18,9 +18,9 @@ PASS. The client demo is deployed, publicly reachable, and suitable for the sche
 | Container registry | `mandevalg5uwa2026.azurecr.io` |
 | Container Apps environment | `mandeval-demo-env` |
 | Container App | `mandeval-timeline-demo` |
-| Revision | `mandeval-timeline-demo--pbc6cr7` |
-| Revision state | Healthy, active, one replica |
-| Resources | 0.25 CPU, 0.5 GiB memory, minimum 1, maximum 1 replica |
+| Revision | `mandeval-timeline-demo--0000001` |
+| Revision state | Healthy and active; scales from zero to one replica |
+| Resources | 0.25 CPU, 0.5 GiB memory, minimum 0, maximum 1 replica |
 | Image | `mandeval-demo:20260827-002` |
 | Image digest | `sha256:c70f3481e3d821da20c793e0097448b37d51fb2a4b86a4c447f24c5fa07d7898` |
 | Local image ID | `sha256:e09204242ae289a10caa0120b3838eabadaf2f4176c9fb87e41fa54622cd97fa` |
@@ -46,7 +46,7 @@ PASS. The client demo is deployed, publicly reachable, and suitable for the sche
 | Public Azure readiness | PASS - database connected, 279 records |
 | Public API acceptance | PASS - list 279, detail `WA-032`, search 87, events 5, 404, root, and SPA route |
 | Public browser acceptance | PASS - timeline rendered, search and detail interaction worked, no console errors |
-| Azure revision | PASS - provisioned, active, healthy, one replica |
+| Azure revision | PASS - provisioned, active, healthy, scale range zero to one replica |
 | Delivery character scan | PASS |
 
 ## Data Advisories
