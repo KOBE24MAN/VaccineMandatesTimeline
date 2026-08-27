@@ -6,7 +6,7 @@ RUN npm ci
 COPY frontend_client/ ./
 RUN npm run build
 
-FROM python:3.12-slim AS runtime
+FROM node:20-alpine AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -19,10 +19,25 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN addgroup --system app && adduser --system --ingroup app app
+RUN for attempt in 1 2 3; do \
+        apk add --no-cache python3 py3-pip && break; \
+        if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+        sleep 3; \
+    done \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && addgroup -S app \
+    && adduser -S -D -H -G app app
 
 COPY requirements-demo.txt ./
-RUN pip install --no-cache-dir --disable-pip-version-check -r requirements-demo.txt
+RUN pip install \
+        --break-system-packages \
+        --no-cache-dir \
+        --disable-pip-version-check \
+        --retries 5 \
+        --timeout 60 \
+        -r requirements-demo.txt \
+    && rm -rf /usr/local/lib/node_modules \
+    && rm -f /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx
 
 COPY app ./app
 COPY main.py ./main.py

@@ -1,17 +1,39 @@
 # Team Handoff
 
+## Public Demo
+
+The deployed client demo is available at:
+
+https://mandeval-timeline-demo.whitesea-84fcda14.australiaeast.azurecontainerapps.io/
+
+The client launcher in `release/Client_Demo_Package` checks the public readiness endpoint and opens this URL. It does not require Docker or Azure credentials.
+
 ## Architecture
 
-The final demo uses one container. A React production build is served by FastAPI, and all API reads use an immutable SQLite database included in the image. The Excel source file is never loaded at runtime and is not copied into the image.
+The demo uses one container. A React production build is served by FastAPI, and all API reads use an immutable SQLite database included in the image. Excel and CSV source files are not loaded at runtime and are not copied into the runtime image.
+
+## Azure Resources
+
+- Resource group: `mandeval-demo-rg`
+- Registry: `mandevalg5uwa2026.azurecr.io`
+- Container Apps environment: `mandeval-demo-env`
+- Container App: `mandeval-timeline-demo`
+- Region: Australia East
+- Image digest: `sha256:c70f3481e3d821da20c793e0097448b37d51fb2a4b86a4c447f24c5fa07d7898`
+- Managed identity: `mandeval-pull-identity`
+
+The app uses 0.25 CPU and 0.5 GiB memory with one minimum and one maximum replica. Registry admin access remains disabled; the Container App pulls the image through the managed identity.
 
 ## Local Operation
 
-1. Start Docker Desktop.
-2. Double-click `Start-Local-Demo.bat` in the repository root.
-3. Wait for `[OK] The demo is ready` and use the browser window that opens.
+The simplest local fallback does not require Docker:
+
+1. Double-click `Start-Local-Demo.bat` in the repository root.
+2. Wait for `[OK] The demo is ready`.
+3. Use `http://localhost:8000/`.
 4. Double-click `Stop-Local-Demo.bat` when finished.
 
-The fixed container name is `mandeval-demo`. The local URL is `http://localhost:8000/`.
+Docker Desktop has a workstation-specific socket startup issue. A working Docker Engine is available in Ubuntu WSL 2 for image builds and container testing.
 
 ## Data Rebuild
 
@@ -21,27 +43,24 @@ Run the following command only when the approved workbook changes:
 .venv\Scripts\python.exe scripts\build_demo_data.py --source "..\Modification Brief\all_mandates.xlsx" --version demo-2026-08-26
 ```
 
-Review `data/release/release-manifest.json`, rerun all acceptance checks, and update the release version before deployment.
+Review the generated manifest, rerun all tests and acceptance checks, build a new immutable image tag, and deploy a new Container Apps revision. Never overwrite source data to resolve an uncertain date without client approval.
 
-## Azure Deployment
+## Future Deployment
 
-The workflow `.github/workflows/deploy-azure.yml` uses GitHub OIDC, Azure Container Registry, and Azure Container Apps. It builds `Dockerfile.demo`, deploys one replica, verifies `/health/ready`, injects the deployed URL into the client package, and uploads that package as a workflow artifact.
+The current deployment was performed directly from `zijun-branch`. The workflow template at `.github/workflows/deploy-azure.yml` is not the authoritative deployment path until the team configures GitHub OIDC permissions and validates it in this repository.
 
-Required GitHub secrets:
+For a manual update:
 
-- `AZURE_CLIENT_ID`
-- `AZURE_TENANT_ID`
-- `AZURE_SUBSCRIPTION_ID`
+1. Rebuild and test `Dockerfile.demo`.
+2. Push a new unique image tag to `mandevalg5uwa2026.azurecr.io`.
+3. Update `mandeval-timeline-demo` to the new image digest.
+4. Confirm the revision is healthy before removing or deactivating the prior revision.
+5. Repeat the public API and browser acceptance checks.
 
-Required GitHub variables:
+## Cost Control
 
-- `AZURE_ACR_NAME`
-- `AZURE_CONTAINER_APP_NAME`
-- `AZURE_CONTAINER_APP_ENVIRONMENT`
-- `AZURE_RESOURCE_GROUP`
-
-No database password or external database URL is required.
+The app currently keeps one replica ready for the scheduled demonstration. After the demonstration period, the team can set the minimum replica count to zero to reduce idle consumption, accepting a possible cold-start delay.
 
 ## Recovery
 
-If a deployment is unhealthy, use Azure Container Apps revision management to route traffic back to the previously healthy revision. If local startup fails, run `Stop-Local-Demo.bat`, confirm Docker Desktop is ready, and run `Start-Local-Demo.bat` again.
+If a new revision is unhealthy, route traffic back to the most recent healthy revision. The deployed database is immutable, so restarting or replacing a replica does not alter the 279-record release snapshot.

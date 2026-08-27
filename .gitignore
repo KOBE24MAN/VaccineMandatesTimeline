@@ -8,6 +8,7 @@ env/
 venv/
 .env
 .acceptance/
+.installers/
 .pytest_cache/
 .pytest_tmp/
 *.egg-info/

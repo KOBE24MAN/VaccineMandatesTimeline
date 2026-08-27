@@ -1,52 +1,68 @@
-# Acceptance report — 2026-08-23
+# Acceptance Report - 2026-08-27
 
-Branch: `codex/backend-production-readiness`  
-Base: `origin/main` at `96a9520dce93c1fdc466084dbae134086f4ea9fc`
+Branch: `zijun-branch`
 
-## Passed locally
+Public demo: https://mandeval-timeline-demo.whitesea-84fcda14.australiaeast.azurecontainerapps.io/
+
+## Release Decision
+
+PASS. The client demo is deployed, publicly reachable, and suitable for the scheduled demonstration.
+
+## Azure Deployment
+
+| Item | Value |
+|---|---|
+| Subscription | Azure for Students |
+| Region | Australia East |
+| Resource group | `mandeval-demo-rg` |
+| Container registry | `mandevalg5uwa2026.azurecr.io` |
+| Container Apps environment | `mandeval-demo-env` |
+| Container App | `mandeval-timeline-demo` |
+| Revision | `mandeval-timeline-demo--pbc6cr7` |
+| Revision state | Healthy, active, one replica |
+| Resources | 0.25 CPU, 0.5 GiB memory, minimum 1, maximum 1 replica |
+| Image | `mandeval-demo:20260827-002` |
+| Image digest | `sha256:c70f3481e3d821da20c793e0097448b37d51fb2a4b86a4c447f24c5fa07d7898` |
+| Local image ID | `sha256:e09204242ae289a10caa0120b3838eabadaf2f4176c9fb87e41fa54622cd97fa` |
+| Local image size | 125,790,523 bytes |
+| Registry access | User-assigned managed identity with AcrPull; registry admin account disabled |
+
+## Acceptance Results
 
 | Gate | Result |
 |---|---|
-| Source data validation | PASS — 10 passed, 0 warnings, 0 errors |
-| Automated backend/data tests | PASS — 20 passed, warnings treated as errors |
-| Clean database reconstruction | PASS — 279 mandates, 341 category links, 5 events |
-| Rebuilt vs committed SQLite | PASS — all values equal in all three tables |
-| Approved update scope | PASS — exactly 18 IDs; only removal dates and derived durations changed in legacy fields |
-| Remaining ongoing audit | PASS — exactly 9 documented IDs |
-| Update idempotency | PASS — covered by two consecutive applications in tests |
-| Actual HTTP smoke test | PASS — readiness 279; WA filter/pagination/detail verified |
-| Python production and test dependency audits | PASS — no known vulnerabilities |
-| Python compilation | PASS |
-| Frontend ESLint | PASS — no errors or warnings |
-| Frontend TypeScript/Vite production build | PASS — 963 modules transformed |
-| Frontend production dependency audit | PASS — 0 vulnerabilities |
-| Compose and workflow YAML parsing | PASS |
-| Docker Desktop installation/runtime | PASS — Desktop 4.87.0; Engine/CLI 29.7.2; Compose 5.4.0; WSL 2 backend |
-| Docker image build | PASS — Python 3.12 slim application images built successfully |
-| PostgreSQL Compose integration | PASS — PostgreSQL 16 healthy; initializer exited 0; API healthy on port 8000 |
-| Live PostgreSQL/API acceptance | PASS — 279 mandates, 341 category links, 5 events; filters, pagination, detail, search, validation and CORS verified |
-| PostgreSQL persistence/recovery | PASS — database restart retained all 279 mandates and the API reconnected automatically |
-| Azure local tooling | PASS — Azure CLI 2.89.1 authenticated to the enabled `Azure for Students` subscription; Container Apps extension 1.3.0b4 installed |
-| `git diff --check` | PASS (Windows line-ending notices only) |
-| Credential and tracked-artifact scan | PASS |
+| Source workbook validation | PASS - 279 records and 279 distinct IDs |
+| Deterministic CSV output | PASS - SHA256 `99344e2b557870b829314fb4b72ec8f22552d2c4247cef3be6204dbf1d072d04` |
+| Deterministic SQLite output | PASS - SHA256 `fbad6ebcee99520791e828e2e701bb55276510dc14f99a5f0d55752d653609ee` |
+| Database contents | PASS - 279 mandates, 341 category links, 5 notable events |
+| Automated backend tests | PASS - 24 tests |
+| Frontend lint | PASS |
+| Frontend production build | PASS |
+| Local container readiness | PASS - database connected, 279 records |
+| Local API acceptance | PASS - list, detail `WA-032`, search, events, 404, root, and SPA route |
+| Container security | PASS - user `app`, read-only root filesystem, no new privileges |
+| Runtime contents | PASS - no XLSX, CSV, Node.js executable, or Node modules |
+| Container restart recovery | PASS - database connected, 279 records, search returned 87 results |
+| Public Azure readiness | PASS - database connected, 279 records |
+| Public API acceptance | PASS - list 279, detail `WA-032`, search 87, events 5, 404, root, and SPA route |
+| Public browser acceptance | PASS - timeline rendered, search and detail interaction worked, no console errors |
+| Azure revision | PASS - provisioned, active, healthy, one replica |
+| Delivery character scan | PASS |
 
-## Environment-dependent gate not executed
+## Data Advisories
 
-| Gate | Status and required next action |
-|---|---|
-| Azure deployment and live smoke | NOT RUN — `Azure for Students` is available, but resource providers are not yet registered and no billable resources have been created. Team approval, resource names, OIDC identity, and the production database URL are still required. |
+- `VIC-086`, `WA-032`, and `WA-052` are marked `date_uncertain` because the approved source data does not support a confident normal timeline position.
+- `WA-032` preserves a negative source duration caused by its recorded date sequence.
+- `VIC-086` and `WA-052` have no start date in the approved source workbook.
+- Source business data remains unchanged where uncertainty exists.
 
-## Non-production advisory
+## Host Notes
 
-The full npm audit reports vulnerabilities in inherited development/build tooling
-(ESLint 8, Vite 5, Tailwind/PostCSS dependency tree). `npm audit --omit=dev`
-reports zero vulnerabilities, so these packages are not present in the deployed
-static bundle. A separate frontend-toolchain major upgrade should address them; it
-is not mixed into this backend/data change because it carries UI build-migration risk.
+Docker Desktop 4.88.1 on this workstation continues to fail while creating its Windows socket. The verified Docker Engine in Ubuntu WSL 2 was used for the build and acceptance process. The public client demo does not require Docker, Azure credentials, or local software installation.
 
-## Release decision
+## Character Scan Confirmation
 
-The code and all local data/API/frontend/Docker/PostgreSQL gates pass. If deploying
-now, release is conditional on selecting an approved Azure subscription and passing
-the Azure live smoke gate. The nine unresolved ongoing records also require explicit
-client evidence before their dates can be changed.
+- No Chinese characters in generated file or directory names.
+- No Chinese characters in scripts, code comments, logs, UI text, or documentation.
+- No non-ASCII characters in `.bat` and `.cmd` files.
+- Any remaining Chinese characters exist only in preserved source data, if applicable.

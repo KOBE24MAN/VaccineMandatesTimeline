@@ -13,6 +13,7 @@ EXCLUDED_PARTS = {
     ".git",
     ".venv",
     ".acceptance",
+    ".installers",
     ".pytest_cache",
     ".pytest_tmp",
     ".npm-cache",
