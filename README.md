@@ -1,3 +1,21 @@
+# MandEval — Vaccine Mandates Timeline
+
+The current frontend is a static React application in [`frontend_client/`](frontend_client/README.md). It reads [`vaccine_mandates.csv`](vaccine_mandates.csv) directly in the browser; no Python server or database is needed.
+
+```sh
+cd frontend_client
+npm ci
+npm run dev
+```
+
+For tests, production builds, data updates and timeline rules, see the [frontend guide](frontend_client/README.md).
+
+The current supplied dataset contains 54 WA records (48 originals and 6 linked boosters). Frontend files stay in `frontend_client/`, and the source dataset stays at the repository root.
+
+## Historical backend documentation
+
+The files and instructions below describe the previous backend workflow. They are retained for reference and are not required for the current frontend.
+
 # Mandeval Backend
 
 FastAPI + SQLite backend for the COVID-19 Vaccine Mandates Timeline visualisation project.

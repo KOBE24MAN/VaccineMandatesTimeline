@@ -4,17 +4,17 @@ import type { EventIndex, Region } from "../types/event";
 import { ALL_REGIONS } from "../types/event";
 import { parseDate } from "../utils/dates";
 
-const MARGIN_LEFT  = 56;
+const MARGIN_LEFT = 56;
 const MARGIN_RIGHT = 16;
 
 const REGION_COLOR: Record<Region, string> = {
-  WA:  "#2563EB",
-  NT:  "#EA580C",
+  WA: "#2563EB",
+  NT: "#EA580C",
   QLD: "#DC2626",
   NSW: "#16A34A",
   VIC: "#7C3AED",
   TAS: "#0D9488",
-  SA:  "#DB2777",
+  SA: "#DB2777",
   ACT: "#CA8A04",
 };
 
@@ -45,7 +45,9 @@ export function Minimap({
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const obs = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    const obs = new ResizeObserver(([entry]) =>
+      setWidth(entry.contentRect.width),
+    );
     obs.observe(el);
     return () => obs.disconnect();
   }, []);
@@ -55,52 +57,58 @@ export function Minimap({
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
 
-    const totalH  = 48;
-    const rowH    = totalH / ALL_REGIONS.length;
-    const barH    = Math.max(rowH * 0.4, 2);
+    const totalH = 48;
+    const rowH = totalH / ALL_REGIONS.length;
+    const barH = Math.max(rowH * 0.4, 2);
 
-    const xScale = d3.scaleTime()
+    const xScale = d3
+      .scaleTime()
       .domain([fullStart, fullEnd])
       .range([0, innerW]);
 
     const g = svg.append("g").attr("transform", `translate(${MARGIN_LEFT},0)`);
 
     // Compressed event bars
-    events.forEach(e => {
+    events.forEach((e) => {
       const ri = ALL_REGIONS.indexOf(e.region as Region);
-      if (ri === -1) return;
+      if (ri === -1 || !e.start_date || !e.end_date) return;
 
-      const startD = parseDate(e.start_date);
-      const endD   = e.end_date
-        ? parseDate(e.end_date)
-        : new Date(startD.getTime() + 14 * 24 * 60 * 60 * 1000);
-
-      const x = xScale(startD);
-      const w = Math.max(xScale(endD) - x, 1);
       const y = ri * rowH + (rowH - barH) / 2;
-
-      g.append("rect")
-        .attr("x", x).attr("y", y)
-        .attr("width", w).attr("height", barH)
-        .attr("fill", REGION_COLOR[e.region as Region])
-        .attr("opacity", 0.55);
+      // Draw only supplied segments, leaving unknown original intervals blank.
+      e.segments.forEach((segment) => {
+        const x = xScale(parseDate(segment.start));
+        const w = Math.max(xScale(parseDate(segment.end)) - x, 1);
+        g.append("rect")
+          .attr("x", x)
+          .attr("y", y)
+          .attr("width", w)
+          .attr("height", barH)
+          .attr(
+            "fill",
+            segment.kind === "booster" ? "#143454" : REGION_COLOR[e.region],
+          )
+          .attr("opacity", 0.55);
+      });
     });
 
     // Date axis
     g.append("g")
       .attr("transform", `translate(0,${totalH})`)
       .call(d3.axisBottom(xScale).ticks(5).tickSize(0))
-      .call(ax => ax.select(".domain").remove())
-      .call(ax => ax.selectAll("text")
-        .attr("fill", "#9CA3AF")
-        .attr("font-size", "9px")
-        .attr("y", 4),
+      .call((ax) => ax.select(".domain").remove())
+      .call((ax) =>
+        ax
+          .selectAll("text")
+          .attr("fill", "#9CA3AF")
+          .attr("font-size", "9px")
+          .attr("y", 4),
       );
 
     // Region labels
     ALL_REGIONS.forEach((region, ri) => {
       const y = ri * rowH + rowH / 2;
-      svg.append("text")
+      svg
+        .append("text")
         .attr("x", MARGIN_LEFT - 4)
         .attr("y", y)
         .attr("text-anchor", "end")
@@ -118,7 +126,7 @@ export function Minimap({
   const winW = Math.max(xScale(windowEnd) - xScale(windowStart), 8);
 
   // Drag state tracked via refs (no re-render during drag)
-  const dragging   = useRef(false);
+  const dragging = useRef(false);
   const dragStartX = useRef(0);
   const dragStartWindow = useRef({ start: windowStart, end: windowEnd });
 
@@ -135,16 +143,26 @@ export function Minimap({
     const dx = e.clientX - dragStartX.current;
     const totalMs = fullEnd.getTime() - fullStart.getTime();
     const dtMs = (dx / innerW) * totalMs;
-    const duration = dragStartWindow.current.end.getTime() - dragStartWindow.current.start.getTime();
+    const duration =
+      dragStartWindow.current.end.getTime() -
+      dragStartWindow.current.start.getTime();
     let newStart = new Date(dragStartWindow.current.start.getTime() + dtMs);
-    let newEnd   = new Date(dragStartWindow.current.end.getTime()   + dtMs);
+    let newEnd = new Date(dragStartWindow.current.end.getTime() + dtMs);
     // Clamp to full range
-    if (newStart < fullStart) { newStart = fullStart; newEnd = new Date(fullStart.getTime() + duration); }
-    if (newEnd   > fullEnd)   { newEnd   = fullEnd;   newStart = new Date(fullEnd.getTime()   - duration); }
+    if (newStart < fullStart) {
+      newStart = fullStart;
+      newEnd = new Date(fullStart.getTime() + duration);
+    }
+    if (newEnd > fullEnd) {
+      newEnd = fullEnd;
+      newStart = new Date(fullEnd.getTime() - duration);
+    }
     onWindowChange(newStart, newEnd);
   };
 
-  const handlePointerUp = () => { dragging.current = false; };
+  const handlePointerUp = () => {
+    dragging.current = false;
+  };
 
   // Click outside window indicator → center window at click point
   const handleSvgClick = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -153,12 +171,18 @@ export function Minimap({
     if (clickX < 0 || clickX > innerW) return;
 
     const clickDate = xScale.invert(clickX);
-    const duration  = windowEnd.getTime() - windowStart.getTime();
-    const half      = duration / 2;
+    const duration = windowEnd.getTime() - windowStart.getTime();
+    const half = duration / 2;
     let newStart = new Date(clickDate.getTime() - half);
-    let newEnd   = new Date(clickDate.getTime() + half);
-    if (newStart < fullStart) { newStart = fullStart; newEnd = new Date(fullStart.getTime() + duration); }
-    if (newEnd   > fullEnd)   { newEnd   = fullEnd;   newStart = new Date(fullEnd.getTime()   - duration); }
+    let newEnd = new Date(clickDate.getTime() + half);
+    if (newStart < fullStart) {
+      newStart = fullStart;
+      newEnd = new Date(fullStart.getTime() + duration);
+    }
+    if (newEnd > fullEnd) {
+      newEnd = fullEnd;
+      newStart = new Date(fullEnd.getTime() - duration);
+    }
     onWindowChange(newStart, newEnd);
   };
 
@@ -166,7 +190,7 @@ export function Minimap({
     <div
       ref={containerRef}
       className="relative bg-gray-50 border-t border-gray-200 select-none"
-      style={{ height: 64 }}
+      style={{ height: 64, flexShrink: 0 }}
     >
       {/* Static event bars */}
       <svg
@@ -178,10 +202,29 @@ export function Minimap({
       {/* Draggable window indicator */}
       <div
         className="absolute top-0 h-12 rounded border border-blue-400 bg-blue-300 opacity-30 cursor-grab active:cursor-grabbing"
-        style={{ left: winX, width: winW }}
+        style={{ left: winX, width: winW, touchAction: "none" }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        role="slider"
+        tabIndex={0}
+        aria-label="Timeline overview window"
+        aria-valuemin={fullStart.getTime()}
+        aria-valuemax={fullEnd.getTime()}
+        aria-valuenow={windowStart.getTime()}
+        aria-valuetext={`${windowStart.toISOString().slice(0, 10)} to ${windowEnd.toISOString().slice(0, 10)}`}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          const delta =
+            (windowEnd.getTime() - windowStart.getTime()) *
+            (event.key === "ArrowLeft" ? -0.1 : 0.1);
+          onWindowChange(
+            new Date(windowStart.getTime() + delta),
+            new Date(windowEnd.getTime() + delta),
+          );
+        }}
       />
     </div>
   );
