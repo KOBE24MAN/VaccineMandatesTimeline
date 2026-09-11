@@ -1,4 +1,22 @@
-# Mandeval Backend
+# MandEval Vaccine Mandates Timeline
+
+## Standalone frontend
+
+The `frontend-client/` folder contains the timeline interface, 279 mandate records,
+five notable events, and policy-name fuzzy search. It runs entirely in the browser
+without starting the Python backend. Its CSV files are separate from the backend data.
+
+```bash
+cd frontend-client
+npm ci
+npm run dev -- --host 127.0.0.1 --port 5174
+```
+
+Open the local URL printed in the terminal. On Windows, you can instead double-click
+`frontend-client/Start-Local-Demo.bat`; use `frontend-client/Stop-Local-Demo.bat` to stop it.
+See [the frontend README](frontend-client/README.md) for file locations, checks, and building.
+
+## Existing backend
 
 FastAPI + SQLite backend for the COVID-19 Vaccine Mandates Timeline visualisation project.
 
