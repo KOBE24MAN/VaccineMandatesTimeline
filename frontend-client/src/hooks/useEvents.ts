@@ -11,13 +11,27 @@ interface UseEventsReturn {
   fetchDetail: (id: string) => Promise<EventDetail>;
 }
 
-function mapToIndex(m: Mandate): EventIndex {
+export function mapToIndex(m: Mandate, mandatesById: Map<string, Mandate>): EventIndex {
+  const booster = m.booster_id ? mandatesById.get(m.booster_id) : undefined;
+  const boosterOverlay = booster?.enforcement_date && (booster.removal_date || booster.ongoing)
+    ? {
+        id: booster.id,
+        title: booster.name ?? booster.id,
+        start_date: booster.enforcement_date,
+        end_date: booster.removal_date,
+        ongoing: booster.ongoing,
+      }
+    : null;
+
   return {
     id: m.id,
     title: m.name ?? m.id,
     start_date: m.effective_date ?? m.enforcement_date ?? "",
+    effective_date: m.effective_date,
     end_date: m.removal_date ?? null,
+    announcement_date: m.announcement_date ?? null,
     enforcement_date: m.enforcement_date ?? null,
+    booster: boosterOverlay,
     region: m.jurisdiction as Region,
     type: (m.type as EventType) ?? "Employment",
     short_description: m.target_category,
@@ -28,9 +42,9 @@ function mapToIndex(m: Mandate): EventIndex {
   };
 }
 
-function mapToDetail(m: Mandate): EventDetail {
+function mapToDetail(m: Mandate, mandatesById: Map<string, Mandate>): EventDetail {
   return {
-    ...mapToIndex(m),
+    ...mapToIndex(m, mandatesById),
     target: m.target,
     authority: m.authority,
     compliance: m.compliance,
@@ -40,7 +54,16 @@ function mapToDetail(m: Mandate): EventDetail {
     removal_method: m.removal_method,
     removal_details: m.removal_details,
     mandate_communications: m.mandate_communications,
+    communications: m.communications,
+    vaccine_eligibility_info: m.vaccine_eligibility_info,
+    vaccine_availability_info: m.vaccine_availability_info,
+    ATAGI: m.ATAGI,
+    uptake: m.uptake,
+    popu_info: m.popu_info,
+    notes: m.notes,
+    source: m.source,
     ref_code: m.ref_code,
+    ref_no: m.ref_no,
     enforcement_date: m.enforcement_date,
     date_uncertain: m.date_uncertain,
   };
@@ -62,7 +85,12 @@ export function useEvents(): UseEventsReturn {
     loadMandates()
       .then((mandates) => {
         if (!cancelled) {
-          setEvents(mandates.filter(m => m.effective_date || m.enforcement_date).map(mapToIndex));
+          const mandatesById = new Map(mandates.map(m => [m.id, m]));
+          const boosterIds = new Set(mandates.map(m => m.booster_id).filter(Boolean));
+          setEvents(mandates
+            .filter(m => !boosterIds.has(m.id))
+            .filter(m => m.effective_date || m.enforcement_date)
+            .map(m => mapToIndex(m, mandatesById)));
           setTotalRecords(mandates.length);
           setLoading(false);
         }
@@ -80,8 +108,10 @@ export function useEvents(): UseEventsReturn {
   }, []);
 
   async function fetchDetail(id: string): Promise<EventDetail> {
-    const data = await loadMandate(id);
-    return mapToDetail(data);
+    const mandates = await loadMandates();
+    const mandatesById = new Map(mandates.map(m => [m.id, m]));
+    const data = mandatesById.get(id) ?? await loadMandate(id);
+    return mapToDetail(data, mandatesById);
   }
 
   return { events, totalRecords, loading, error, fetchDetail };

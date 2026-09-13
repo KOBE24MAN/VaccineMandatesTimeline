@@ -65,9 +65,12 @@ function SummaryCard({ ev, onSelect }: { ev: EventIndex; onSelect: () => void })
           <p className="text-xs text-gray-800 leading-snug mb-2 font-medium">{ev.target}</p>
         )}
         <div className="flex flex-col gap-0.5">
+          <DateRow label="Announced" value={ev.announcement_date} />
           <DateRow label="Effective" value={ev.start_date} />
           <DateRow label="Enforcement" value={ev.enforcement_date} />
           <DateRow label="Removal" value={ev.end_date} />
+          <DateRow label="Booster starts" value={ev.booster?.start_date} />
+          <DateRow label="Booster ends" value={ev.booster?.end_date} />
         </div>
       </div>
       <div className="px-3 py-1.5 border-t border-black/10 text-right text-xs font-semibold" style={{ color }}>
@@ -86,6 +89,14 @@ function DetailCard({ detail }: { detail: EventDetailType }) {
     { label: "Executive orders", value: detail.executive_orders },
     { label: "Removal method",   value: detail.removal_method },
     { label: "Removal details",  value: detail.removal_details },
+    { label: "Communications",   value: detail.communications ?? detail.mandate_communications },
+    { label: "Vaccine eligibility", value: detail.vaccine_eligibility_info },
+    { label: "Vaccine availability", value: detail.vaccine_availability_info },
+    { label: "ATAGI",            value: detail.ATAGI },
+    { label: "Uptake",           value: detail.uptake },
+    { label: "Population affected", value: detail.popu_info },
+    { label: "Notes",            value: detail.notes },
+    { label: "Source",           value: detail.source },
   ].filter(s => s.value);
 
   return (
@@ -103,9 +114,12 @@ function DetailCard({ detail }: { detail: EventDetailType }) {
           </span>
         </div>
         <div className="flex flex-col gap-0.5 mb-2">
+          <DateRow label="Announced"    value={detail.announcement_date} />
           <DateRow label="Effective"    value={detail.start_date} />
           <DateRow label="Enforcement"  value={detail.enforcement_date} />
           <DateRow label="Removal"      value={detail.end_date} />
+          <DateRow label="Booster starts" value={detail.booster?.start_date} />
+          <DateRow label="Booster ends"   value={detail.booster?.end_date} />
         </div>
         {detail.target && (
           <p className="text-xs text-gray-600 leading-snug">{detail.target}</p>
@@ -119,10 +133,11 @@ function DetailCard({ detail }: { detail: EventDetailType }) {
         </div>
       ))}
 
-      {(detail.authority || detail.ref_code) && (
+      {(detail.authority || detail.ref_code || detail.ref_no) && (
         <div className="px-3 py-2 border-t border-black/10 flex flex-wrap gap-3">
           {detail.authority && <p className="text-xs text-gray-400">Authority: {detail.authority}</p>}
           {detail.ref_code  && <p className="text-xs text-gray-400">Ref: {detail.ref_code}</p>}
+          {detail.ref_no    && <p className="text-xs text-gray-400">Ref no: {detail.ref_no}</p>}
         </div>
       )}
     </div>

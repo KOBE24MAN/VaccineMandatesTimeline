@@ -26,6 +26,7 @@ interface UseFiltersReturn {
  * filter state actually changes — no backend requests involved.
  */
 export function useFilters(events: EventIndex[]): UseFiltersReturn {
+  const [categoryMode, setCategoryMode] = useState(false);
   const [activeRegions, setActiveRegions] = useState<Set<Region>>(
     new Set(ALL_REGIONS)
   );
@@ -38,16 +39,18 @@ export function useFilters(events: EventIndex[]): UseFiltersReturn {
 
   const filteredEvents = useMemo(() => {
     const allCatsActive = activeCategories.size === ALL_CATEGORIES.length;
+    const matchesType = (type: EventType) =>
+      type.split(",").map(part => part.trim()).some(part => activeTypes.has(part));
     return events.filter(e => {
       if (!activeRegions.has(e.region)) return false;
       // Normal mode: types active + all categories — type filter only
-      if (allCatsActive && activeTypes.size > 0) return activeTypes.has(e.type);
+      if (!categoryMode) return matchesType(e.type);
       const cats = (e.short_description ?? "").split(",").map(s => s.trim()) as Category[];
       // Category mode (all cats, no types): show everything; partial cats: match active ones
       const matchesCategory = allCatsActive || cats.some(c => activeCategories.has(c));
-      return activeTypes.has(e.type) || matchesCategory;
+      return matchesType(e.type) || matchesCategory;
     });
-  }, [events, activeRegions, activeTypes, activeCategories]);
+  }, [events, activeRegions, activeTypes, activeCategories, categoryMode]);
 
   function toggleRegion(region: Region) {
     setActiveRegions((prev) => {
@@ -74,11 +77,12 @@ export function useFilters(events: EventIndex[]): UseFiltersReturn {
   }
 
   function enterCategoryMode() {
+    setCategoryMode(true);
     // Pre-select only categories that have at least one event matching the
     // currently active types — so deselected types carry over as deselected categories.
     const relevant = new Set<Category>();
     for (const ev of events) {
-      if (!activeTypes.has(ev.type)) continue;
+      if (!ev.type.split(",").map(part => part.trim()).some(part => activeTypes.has(part))) continue;
       const cats = (ev.short_description ?? "").split(",").map(s => s.trim());
       cats.forEach(c => {
         if ((ALL_CATEGORIES as readonly string[]).includes(c)) relevant.add(c as Category);
@@ -99,7 +103,7 @@ export function useFilters(events: EventIndex[]): UseFiltersReturn {
     toggleCategory,
     selectAllRegions: () => setActiveRegions(new Set(ALL_REGIONS)),
     clearAllRegions: () => setActiveRegions(new Set()),
-    selectAllTypes: () => setActiveTypes(new Set(ALL_EVENT_TYPES)),
+    selectAllTypes: () => { setCategoryMode(false); setActiveTypes(new Set(ALL_EVENT_TYPES)); },
     clearAllTypes: () => setActiveTypes(new Set()),
     selectAllCategories: () => setActiveCategories(new Set(ALL_CATEGORIES)),
     clearAllCategories: () => setActiveCategories(new Set()),

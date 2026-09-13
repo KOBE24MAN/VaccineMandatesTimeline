@@ -1,10 +1,11 @@
-import { useRef, useEffect, useState, useMemo } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useMemo } from "react";
 import * as d3 from "d3";
 import type { EventIndex, Region, NotableEvent } from "../types/event";
 import { ALL_REGIONS } from "../types/event";
 import { parseDate, yearsBetween } from "../utils/dates";
+import { visualStartDate, visualEndDate, hasOngoingSegment, timelineGroupKey } from "../utils/timeline";
 
-const MARGIN = { top: 32, right: 16, bottom: 8, left: 56 };
+const MARGIN = { top: 70, right: 16, bottom: 8, left: 56 };
 const LANE_GAP = 2; // px gap between lanes
 
 export const REGION_COLOR: Record<Region, string> = {
@@ -38,7 +39,7 @@ function deduplicateEvents(events: EventIndex[]): DeduplicatedEvent[] {
   const groups = new Map<string, EventIndex[]>();
 
   for (const ev of events) {
-    const key = `${ev.title}||${ev.region}||${ev.start_date ?? ""}||${ev.end_date ?? ""}`;
+    const key = timelineGroupKey(ev);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(ev);
   }
@@ -61,17 +62,17 @@ function deduplicateEvents(events: EventIndex[]): DeduplicatedEvent[] {
 function assignLanes(events: EventIndex[]): Map<string, number> {
   const sorted = [...events]
     .filter(e => e.start_date)
-    .sort((a, b) => parseDate(a.start_date!).getTime() - parseDate(b.start_date!).getTime());
+    .sort((a, b) => parseDate(visualStartDate(a)).getTime() - parseDate(visualStartDate(b)).getTime());
 
   const laneEnds: number[] = []; // end time of last event in each lane
   const result = new Map<string, number>();
 
   for (const ev of sorted) {
-    const start = parseDate(ev.start_date!).getTime();
-    const end   = (ev as EventIndex).ongoing
+    const start = parseDate(visualStartDate(ev)).getTime();
+    const end   = hasOngoingSegment(ev)
       ? Number.MAX_SAFE_INTEGER
-      : ev.end_date
-        ? parseDate(ev.end_date).getTime()
+      : visualEndDate(ev)
+        ? parseDate(visualEndDate(ev)!).getTime()
         : start + 14 * 24 * 60 * 60 * 1000;
 
     // Find first lane where the previous event has already ended
@@ -85,6 +86,58 @@ function assignLanes(events: EventIndex[]): Map<string, number> {
 }
 
 interface TooltipState { x: number; y: number; event: EventIndex }
+
+function TooltipPeriods({ event }: { event: EventIndex }) {
+  const effective = event.effective_date === undefined ? event.start_date : event.effective_date;
+  const firstStageEnd = effective ?? event.enforcement_date;
+  const end = event.ongoing ? "Ongoing" : event.end_date ?? "End date not recorded";
+  const periods = [
+    ...(event.announcement_date && firstStageEnd && event.announcement_date < firstStageEnd ? [{
+      label: effective ? "Announced → effective" : "Announced → enforcement",
+      dates: `${event.announcement_date} → ${firstStageEnd}`,
+      meaning: effective ? "Announced, not yet effective · pale dashed segment" : "Effective date not recorded · pale dashed segment",
+      kind: "announcement",
+    }] : []),
+    ...(effective && event.enforcement_date && effective < event.enforcement_date ? [{
+      label: "Effective → enforcement",
+      dates: `${effective} → ${event.enforcement_date}`,
+      meaning: "Effective, pending enforcement · light stripes",
+      kind: "pending",
+    }] : []),
+    {
+      label: event.enforcement_date ? "Enforcement → removal" : "Mandate period",
+      dates: `${event.enforcement_date ?? event.start_date} → ${end}`,
+      meaning: event.enforcement_date ? "Active mandate · original solid colour" : "Enforcement date not recorded · solid colour",
+      kind: "active",
+    },
+    ...(event.booster ? [{
+      label: "Booster enforcement → booster removal",
+      dates: `${event.booster.start_date} → ${event.booster.ongoing ? "Ongoing" : event.booster.end_date ?? "End date not recorded"}`,
+      meaning: "Booster requirement · dark striped overlay",
+      kind: "booster",
+    }] : []),
+  ];
+  const color = REGION_COLOR[event.region];
+  return <div className="mt-2 space-y-2 border-t border-gray-200 pt-2">
+    {periods.map(period => <div key={period.kind} className="flex gap-2 leading-snug">
+      <span className="mt-1 h-2.5 w-3.5 flex-shrink-0 rounded-sm" style={{
+        background: period.kind === "announcement" ? `${color}20`
+          : period.kind === "pending" ? `repeating-linear-gradient(45deg, white 0 3px, ${color} 3px 5px)`
+          : period.kind === "booster" ? `repeating-linear-gradient(-45deg, ${d3.color(color)!.darker(1.25)} 0 3px, white 3px 4px)`
+          : eventColor(event.region, event.type),
+        border: period.kind === "announcement" ? `1px dashed ${color}` : undefined,
+      }} />
+      <div>
+        <p className="font-semibold text-gray-700">{period.label}</p>
+        <p className="text-gray-800 tabular-nums">{period.dates}</p>
+        <p className="text-[11px] text-gray-500">{period.meaning}</p>
+      </div>
+    </div>)}
+    {effective && effective === event.enforcement_date && <p className="text-[11px] text-gray-500">Effective and enforced on the same day ({effective}); no pending period.</p>}
+    {event.announcement_date && (!firstStageEnd || event.announcement_date >= firstStageEnd) && <p className="text-[11px] text-gray-500">Announced: {event.announcement_date}{event.announcement_date === firstStageEnd ? " (same day as effective / enforcement)" : ""}.</p>}
+    {!effective && <p className="text-[11px] text-gray-500">Effective date not recorded.</p>}
+  </div>;
+}
 
 interface Props {
   events: EventIndex[];
@@ -108,6 +161,15 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
   const svgRef       = useRef<SVGSVGElement>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [dims, setDims] = useState({ width: 800, height: 500 });
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!tooltip || !tooltipRef.current) return;
+    const el = tooltipRef.current;
+    const left = tooltip.x + 14 + el.offsetWidth <= dims.width - 8
+      ? tooltip.x + 14 : tooltip.x - el.offsetWidth - 14;
+    el.style.left = `${Math.max(8, Math.min(left, dims.width - el.offsetWidth - 8))}px`;
+    el.style.top = `${Math.max(8, Math.min(tooltip.y - 8, dims.height - el.offsetHeight - 8))}px`;
+  }, [tooltip, dims]);
 
   const onClickRef = useRef(onEventClick);
   useEffect(() => { onClickRef.current = onEventClick; }, [onEventClick]);
@@ -204,6 +266,9 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
 
     // ── Defs: stripe patterns (one per region colour) ─────────────────────────
     const defs = svg.append("defs");
+    defs.append("clipPath").attr("id", "timeline-viewport").append("rect")
+      .attr("x", MARGIN.left).attr("y", MARGIN.top)
+      .attr("width", innerW).attr("height", innerH);
 
     // Glow filter for selected bars
     const glowFilter = defs.append("filter").attr("id", "bar-glow").attr("x", "-40%").attr("y", "-40%").attr("width", "180%").attr("height", "180%");
@@ -220,10 +285,21 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
         .attr("patternUnits", "userSpaceOnUse")
         .attr("width", 8).attr("height", 8)
         .attr("patternTransform", "rotate(45)");
-      pat.append("rect").attr("width", 8).attr("height", 8).attr("fill", "white").attr("fill-opacity", 0.55);
+      pat.append("rect").attr("width", 8).attr("height", 8).attr("fill", "white").attr("fill-opacity", 0.92);
       pat.append("line")
         .attr("x1", 0).attr("y1", 0).attr("x2", 0).attr("y2", 8)
-        .attr("stroke", col).attr("stroke-width", 3).attr("stroke-opacity", 0.6);
+        .attr("stroke", col).attr("stroke-width", 3).attr("stroke-opacity", 0.7);
+
+      const boosterPid = `booster-${r}`;
+      const boosterPat = defs.append("pattern")
+        .attr("id", boosterPid)
+        .attr("patternUnits", "userSpaceOnUse")
+        .attr("width", 6).attr("height", 6)
+        .attr("patternTransform", "rotate(-45)");
+      boosterPat.append("rect").attr("width", 6).attr("height", 6).attr("fill", d3.color(col)!.darker(1.25).toString());
+      boosterPat.append("line")
+        .attr("x1", 0).attr("y1", 0).attr("x2", 0).attr("y2", 6)
+        .attr("stroke", "white").attr("stroke-width", 1.5).attr("stroke-opacity", 0.7);
     });
 
     // ── Ongoing tail gradient (fade to white at right viewport edge) ──────────
@@ -284,6 +360,7 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
         .attr("font-weight", "700")
         .text(region);
 
+      const barLayer = svg.append("g").attr("clip-path", "url(#timeline-viewport)");
       rowEvents.forEach(ev => {
           if (!ev.start_date) return;
 
@@ -299,8 +376,14 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
           const x2raw = xScale(endD);
           const x2 = ev.ongoing ? MARGIN.left + innerW : x2raw;
           const w  = Math.max(x2 - x1, 3);
+          const visualStartD = parseDate(visualStartDate(ev));
+          const visualX1 = Math.min(xScale(visualStartD), x1);
+          const boosterEndD = ev.booster?.end_date ? parseDate(ev.booster.end_date) : null;
+          const visualX2raw = hasOngoingSegment(ev) ? MARGIN.left + innerW : boosterEndD && boosterEndD.getTime() > endD.getTime()
+            ? xScale(boosterEndD)
+            : x2raw;
 
-          if ((ev.ongoing ? MARGIN.left + innerW : x2raw) < MARGIN.left || x1 > MARGIN.left + innerW) return;
+          if ((ev.ongoing ? MARGIN.left + innerW : visualX2raw) < MARGIN.left || visualX1 > MARGIN.left + innerW) return;
 
           const lane  = lanes.get(ev.id) ?? 0;
           const barY  = y + rowH - (lane + 1) * laneH + LANE_GAP / 2;
@@ -323,6 +406,23 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
 
           prevBarDimsRef.current.set(ev.id, { barY, barH });
 
+          if (ev.announcement_date && visualStartD.getTime() < startD.getTime()) {
+            const announcementW = Math.max(x1 - visualX1, 2);
+            const announcementY = barY + Math.max(barH * 0.24, 1);
+            const announcementH = Math.max(barH * 0.52, 2);
+            barLayer.append("rect")
+              .attr("x", visualX1).attr("y", announcementY)
+              .attr("width", announcementW).attr("height", announcementH)
+              .attr("rx", announcementH / 2)
+              .attr("fill", REGION_COLOR[region])
+              .attr("fill-opacity", 0.12)
+              .attr("stroke", REGION_COLOR[region])
+              .attr("stroke-width", 1)
+              .attr("stroke-opacity", 0.85)
+              .attr("stroke-dasharray", "3,3")
+              .attr("pointer-events", "none");
+          }
+
           // ── Clip path ──────────────────────────────────────────────────────
           // Controls the visible pill area; animates for grow (new) and resize.
           // For ongoing bars extend the clip past the right edge so the rounded
@@ -344,7 +444,7 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
           }
 
           // ── Fill group ─────────────────────────────────────────────────────
-          const g = svg.append("g")
+          const g = barLayer.append("g")
             .attr("clip-path", `url(#${clipId})`)
             .attr("opacity", isNew ? 0 : 1);
 
@@ -375,12 +475,36 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
             }
           }
 
+          if (ev.booster) {
+            const boosterStartD = parseDate(ev.booster.start_date);
+            const boosterEndD = ev.booster.ongoing ? windowEnd : parseDate(ev.booster.end_date!);
+            if (boosterEndD.getTime() > boosterStartD.getTime()) {
+              const xb1 = xScale(boosterStartD);
+              const xb2 = xScale(boosterEndD);
+              const boosterX = Math.max(xb1, MARGIN.left);
+              const boosterW = Math.max(Math.min(xb2, MARGIN.left + innerW) - boosterX, 0);
+              if (boosterW > 0) {
+                // The booster can outlast the original mandate; do not clip it to the base pill.
+                barLayer.append("rect")
+                  .attr("data-booster-id", ev.booster.id)
+                  .attr("x", boosterX).attr("y", barY + barH * 0.2)
+                  .attr("width", boosterW).attr("height", barH * 0.6)
+                  .attr("rx", Math.min(barH * 0.3, 3))
+                  .attr("fill", `url(#booster-${region})`)
+                  .attr("stroke", "white").attr("stroke-width", 0.8)
+                  .attr("fill-opacity", isSelected ? 1 : 0.92);
+              }
+            }
+          }
+
           // ── Ongoing tail fade overlay ───────────────────────────────────────
-          if (ev.ongoing && showOngoingTail) {
-            const tailX = Math.max(x1, MARGIN.left + innerW - 64);
-            g.append("rect")
-              .attr("x", tailX).attr("y", barY)
-              .attr("width", MARGIN.left + innerW - tailX).attr("height", barH)
+          if (hasOngoingSegment(ev) && showOngoingTail) {
+            const tailStart = ev.ongoing ? x1 : xScale(parseDate(ev.booster!.start_date));
+            const tailX = Math.max(tailStart, MARGIN.left + innerW - 64);
+            barLayer.append("rect")
+              .attr("data-ongoing-tail", ev.id)
+              .attr("x", tailX).attr("y", ev.ongoing ? barY : barY + barH * 0.2)
+              .attr("width", Math.max(MARGIN.left + innerW - tailX, 0)).attr("height", ev.ongoing ? barH : barH * 0.6)
               .attr("fill", `url(#${tailGradId})`).attr("pointer-events", "none");
           }
 
@@ -397,7 +521,7 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
           // ── Outline ────────────────────────────────────────────────────────
           // Ongoing bars extend past the viewport so the right rounded corner is
           // not visible → flat right end. Extend outline width similarly.
-          const outline = svg.append("rect")
+          const outline = barLayer.append("rect")
             .attr("x", x1).attr("width", ev.ongoing ? w + rx : w).attr("rx", rx)
             .attr("fill", "none")
             .attr("stroke", outlineColor)
@@ -421,12 +545,12 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
           }
 
           // ── Ongoing chevron marker ─────────────────────────────────────────
-          if (ev.ongoing && showOngoingTail && barH >= 8) {
+          if (hasOngoingSegment(ev) && showOngoingTail) {
             const cx  = MARGIN.left + innerW - 5;
             const cy  = barY + barH / 2;
             const ch  = Math.min(barH * 0.38, 7);
-            const cw  = Math.min(4, barH * 0.28);
-            svg.append("path")
+            const cw  = Math.min(4, Math.max(2, barH * 0.28));
+            barLayer.append("path")
               .attr("d", `M${cx - cw},${cy - ch} L${cx},${cy} L${cx - cw},${cy + ch}`)
               .attr("fill", "none")
               .attr("stroke", outlineColor)
@@ -437,10 +561,44 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
               .attr("pointer-events", "none");
           }
 
+          // Date boundaries: hollow circle = announced/effective, filled = enforced,
+          // diamond = booster, double circle = removed. Same-day dates share one marker.
+          const milestones = [
+            { label: "Announced", date: ev.announcement_date, kind: "open" },
+            { label: "Effective / start", date: ev.start_date, kind: "open" },
+            { label: "Enforcement", date: ev.enforcement_date, kind: "filled" },
+            { label: "Removal", date: ev.ongoing ? null : ev.end_date, kind: "end" },
+            { label: "Booster starts", date: ev.booster?.start_date, kind: "diamond" },
+            { label: "Booster ends", date: ev.booster?.ongoing ? null : ev.booster?.end_date, kind: "end" },
+          ];
+          const byDate = new Map<string, typeof milestones>();
+          milestones.forEach(point => {
+            if (point.date) byDate.set(point.date, [...(byDate.get(point.date) ?? []), point]);
+          });
+          byDate.forEach((points, date) => {
+            const px = xScale(parseDate(date));
+            if (px < MARGIN.left || px > MARGIN.left + innerW) return;
+            const radius = Math.min(4, Math.max(1.5, barH * 0.23));
+            const point = points.find(p => p.kind === "diamond") ?? points[points.length - 1];
+            const marker = barLayer.append("g").attr("data-milestone", date)
+              .attr("transform", `translate(${px},${midY})`).attr("pointer-events", "none");
+            marker.append("title").text(`${points.map(p => p.label).join(" / ")}: ${date}`);
+            if (point.kind === "diamond") {
+              marker.append("path").attr("d", `M0,${-radius - 1} L${radius + 1},0 L0,${radius + 1} L${-radius - 1},0 Z`)
+                .attr("fill", d3.color(outlineColor)!.darker(1.5).toString())
+                .attr("stroke", "white").attr("stroke-width", 1.2);
+            } else {
+              marker.append("circle").attr("r", radius).attr("fill", point.kind === "filled" ? outlineColor : "white")
+                .attr("stroke", point.kind === "filled" ? "white" : outlineColor).attr("stroke-width", 1.2);
+              if (point.kind === "end") marker.append("circle").attr("r", radius * 0.4).attr("fill", outlineColor);
+            }
+          });
+
           // ── Hit rect ───────────────────────────────────────────────────────
-          svg.append("rect")
-            .attr("x", x1).attr("y", barY)
-            .attr("width", w).attr("height", barH)
+          barLayer.append("rect")
+            .attr("data-event-id", ev.id)
+            .attr("x", visualX1).attr("y", barY)
+            .attr("width", Math.max((ev.ongoing ? MARGIN.left + innerW : visualX2raw) - visualX1, 3)).attr("height", barH)
             .attr("rx", rx).attr("fill", "transparent").attr("cursor", "pointer")
             .on("mouseenter", (e: MouseEvent) => {
               g.attr("opacity", 1);
@@ -490,7 +648,7 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
             const newLabelY = barY + barH / 2;
             const oldLabelY = prevDims ? prevDims.barY + prevDims.barH / 2 : newLabelY;
 
-            const txt = svg.append("text")
+            const txt = barLayer.append("text")
               .attr("x", visibleX1 + rx + 4)
               .attr("dominant-baseline", "middle")
               .attr("fill", "#fff").attr("font-size", `${fontSize}px`)
@@ -627,15 +785,21 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
     }
 
     // ── Stripe legend ─────────────────────────────────────────────────────────
-    // Two items right-aligned: [swatch] Label   [swatch] Label
     const legendRightX = MARGIN.left + innerW - 8;
-    const legendTopY   = MARGIN.top / 2;
+    const legendTopY   = 24;
     const swatchH = 10;
     const swatchW = 14;
     const textGap = 4; // gap between swatch and label
     const itemGap = 14; // gap between the two items
 
     const legendGroup = svg.append("g").attr("pointer-events", "none");
+    legendGroup.append("rect")
+      .attr("x", MARGIN.left).attr("y", 5).attr("width", 18).attr("height", 7).attr("rx", 3)
+      .attr("fill", REGION_COLOR.WA).attr("fill-opacity", 0.12)
+      .attr("stroke", REGION_COLOR.WA).attr("stroke-dasharray", "3,3");
+    legendGroup.append("text")
+      .attr("x", MARGIN.left + 24).attr("y", 12).attr("fill", "#6B7280").attr("font-size", "9px")
+      .text("Announced → effective   ○ Start   ● Enforced   ◆ Booster   ⊙ End");
 
     // Item 2 (rightmost): solid swatch = "Active mandate"
     const item2TextX = legendRightX;
@@ -655,20 +819,36 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
       .attr("width", swatchW).attr("height", swatchH).attr("rx", 3)
       .attr("fill", "none").attr("stroke", "#9CA3AF").attr("stroke-width", 0.5);
 
-    // Item 1 (left of item 2): striped swatch = "Announcement period"
+    // Item 1 (left of item 2): striped swatch = "Pending enforcement"
     const item1RightX = item2SwatchX - itemGap;
     legendGroup.append("text")
       .attr("x", item1RightX).attr("y", legendTopY + swatchH / 2)
       .attr("text-anchor", "end").attr("dominant-baseline", "middle")
-      .attr("fill", "#6B7280").attr("font-size", "9px").text("Announcement period");
-    const annoTextW = "Announcement period".length * 5.2;
-    const item1SwatchX = item1RightX - annoTextW - textGap - swatchW;
+      .attr("fill", "#6B7280").attr("font-size", "9px").text("Pending enforcement");
+    const pendingTextW = "Pending enforcement".length * 5.2;
+    const item1SwatchX = item1RightX - pendingTextW - textGap - swatchW;
     legendGroup.append("rect")
       .attr("x", item1SwatchX).attr("y", legendTopY)
       .attr("width", swatchW).attr("height", swatchH).attr("rx", 3)
       .attr("fill", "url(#stripe-WA)").attr("opacity", 0.85);
     legendGroup.append("rect")
       .attr("x", item1SwatchX).attr("y", legendTopY)
+      .attr("width", swatchW).attr("height", swatchH).attr("rx", 3)
+      .attr("fill", "none").attr("stroke", "#9CA3AF").attr("stroke-width", 0.5);
+
+    const item0RightX = item1SwatchX - itemGap;
+    legendGroup.append("text")
+      .attr("x", item0RightX).attr("y", legendTopY + swatchH / 2)
+      .attr("text-anchor", "end").attr("dominant-baseline", "middle")
+      .attr("fill", "#6B7280").attr("font-size", "9px").text("Booster overlay");
+    const boosterTextW = "Booster overlay".length * 5.2;
+    const item0SwatchX = item0RightX - boosterTextW - textGap - swatchW;
+    legendGroup.append("rect")
+      .attr("x", item0SwatchX).attr("y", legendTopY)
+      .attr("width", swatchW).attr("height", swatchH).attr("rx", 3)
+      .attr("fill", "url(#booster-WA)").attr("opacity", 0.9);
+    legendGroup.append("rect")
+      .attr("x", item0SwatchX).attr("y", legendTopY)
       .attr("width", swatchW).attr("height", swatchH).attr("rx", 3)
       .attr("fill", "none").attr("stroke", "#9CA3AF").attr("stroke-width", 0.5);
 
@@ -681,23 +861,22 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
 
       {tooltip && (
         <div
+          ref={tooltipRef}
+          role="tooltip"
           className={`absolute z-10 pointer-events-none border rounded-lg p-3 text-xs max-w-xs transition-colors ${
             tooltipTransparent
               ? "bg-white/50 backdrop-blur-sm border-gray-200/60 shadow-sm"
               : "bg-white border-gray-200 shadow-lg"
           }`}
           style={{
+            width: Math.min(320, dims.width - 16),
             left: tooltip.x + 14,
             top:  tooltip.y - 8,
-            transform: tooltip.x > dims.width * 0.65 ? "translateX(-110%)" : undefined,
           }}
         >
           <p className={`font-semibold mb-1 ${tooltipTransparent ? "text-gray-900" : "text-gray-800"}`}>{tooltip.event.title}</p>
           <p className={tooltipTransparent ? "text-gray-600" : "text-gray-500"}>{tooltip.event.region} · {tooltip.event.type}</p>
-          <p className={tooltipTransparent ? "text-gray-600" : "text-gray-500"}>
-            {tooltip.event.start_date}
-            {tooltip.event.end_date ? ` — ${tooltip.event.end_date}` : " (ongoing)"}
-          </p>
+          <TooltipPeriods event={tooltip.event} />
           {tooltip.event.short_description && (
             <ul className="mt-1 space-y-0.5 list-none">
               {tooltip.event.short_description.split("\n").map((line, i) => (

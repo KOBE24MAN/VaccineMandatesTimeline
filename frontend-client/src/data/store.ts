@@ -1,4 +1,4 @@
-import mandateCsv from "../../data/All_Mandates.csv?raw";
+import mandateCsv from "../../vaccine_mandates.csv?raw";
 import notableCsv from "../../data/notable_events.csv?raw";
 import { parseMandates, parseNotableEvents, searchDataset, type Mandate } from "./dataset";
 

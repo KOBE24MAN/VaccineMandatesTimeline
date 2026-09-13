@@ -3,6 +3,7 @@ import * as d3 from "d3";
 import type { EventIndex, Region } from "../types/event";
 import { ALL_REGIONS } from "../types/event";
 import { parseDate } from "../utils/dates";
+import { visualStartDate, hasOngoingSegment } from "../utils/timeline";
 
 const MARGIN_LEFT  = 56;
 const MARGIN_RIGHT = 16;
@@ -70,13 +71,15 @@ export function Minimap({
       const ri = ALL_REGIONS.indexOf(e.region as Region);
       if (ri === -1) return;
 
-      const startD = parseDate(e.start_date);
+      const startD = parseDate(visualStartDate(e));
       const endD   = e.end_date
         ? parseDate(e.end_date)
         : new Date(startD.getTime() + 14 * 24 * 60 * 60 * 1000);
+      const boosterEndD = e.booster?.end_date ? parseDate(e.booster.end_date) : null;
+      const visualEndD = hasOngoingSegment(e) ? fullEnd : boosterEndD && boosterEndD.getTime() > endD.getTime() ? boosterEndD : endD;
 
       const x = xScale(startD);
-      const w = Math.max(xScale(endD) - x, 1);
+      const w = Math.max(xScale(visualEndD) - x, 1);
       const y = ri * rowH + (rowH - barH) / 2;
 
       g.append("rect")

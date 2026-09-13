@@ -28,6 +28,7 @@ interface Props {
   manualVisibilityLevel: number | null;
   onVisibilityLevelChange: (level: number | null) => void;
   showOngoingTail: boolean;
+  ongoingCount: number;
   onToggleOngoingTail: () => void;
   tooltipTransparent: boolean;
   onToggleTooltipTransparent: () => void;
@@ -75,6 +76,7 @@ export function FilterBar({
   manualVisibilityLevel,
   onVisibilityLevelChange,
   showOngoingTail,
+  ongoingCount,
   onToggleOngoingTail,
   tooltipTransparent,
   onToggleTooltipTransparent,
@@ -484,6 +486,9 @@ export function FilterBar({
           <label className="flex items-center justify-between cursor-pointer select-none">
             <span className="text-sm text-gray-600">Ongoing tail</span>
             <button
+              aria-label="Ongoing tail"
+              disabled={ongoingCount === 0}
+              title={ongoingCount === 0 ? "All mandates in this dataset have an end date" : "Show a fading tail and arrow on ongoing mandates"}
               onClick={onToggleOngoingTail}
               className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
                 showOngoingTail ? "bg-indigo-600" : "bg-gray-300"
@@ -495,6 +500,7 @@ export function FilterBar({
               }`} />
             </button>
           </label>
+          {ongoingCount === 0 && <p className="text-xs text-gray-400 -mt-1">No ongoing mandates in this dataset.</p>}
           <label className="flex items-center justify-between cursor-pointer select-none">
             <span className="text-sm text-gray-600">Unstack bars</span>
             <button

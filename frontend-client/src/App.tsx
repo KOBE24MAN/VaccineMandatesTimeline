@@ -9,6 +9,7 @@ import { Minimap } from "./components/Minimap";
 import { EventDetail } from "./components/EventDetail";
 import { GroupPanel } from "./components/GroupPanel";
 import { parseDate } from "./utils/dates";
+import { hasOngoingSegment, timelineGroupKey } from "./utils/timeline";
 
 export default function App() {
   const { events, totalRecords, loading, error, fetchDetail } = useEvents();
@@ -81,7 +82,7 @@ export default function App() {
 
     // Position start date ~15% from the left over a 180-day window
     const DAY = 24 * 60 * 60 * 1000;
-    const startMs = parseDate(ev.start_date).getTime();
+    const startMs = parseDate(ev.announcement_date ?? ev.start_date).getTime();
     setWindowStart(new Date(startMs - 25 * DAY));
     setWindowEnd(new Date(startMs + 155 * DAY));
 
@@ -108,8 +109,11 @@ export default function App() {
       return { fullStart: new Date(), fullEnd: new Date() };
     }
     const dates = events.flatMap((e) =>
-      [e.start_date, e.end_date].filter(Boolean).map((d) => parseDate(d!))
+      [e.announcement_date, e.start_date, e.end_date, e.booster?.start_date, e.booster?.end_date]
+        .filter(Boolean)
+        .map((d) => parseDate(d!))
     );
+    if (events.some(hasOngoingSegment)) dates.push(new Date());
     return {
       fullStart: new Date(Math.min(...dates.map((d) => d.getTime()))),
       fullEnd: new Date(Math.max(...dates.map((d) => d.getTime()))),
@@ -189,11 +193,9 @@ export default function App() {
   // If any member of a group is visible at the current level, include ALL members
   // so the stacked badge count stays stable as you zoom in.
   const visibleEvents = useMemo(() => {
-    const dedupKey = (e: typeof filteredEvents[0]) =>
-      `${e.title}||${e.region}||${e.start_date ?? ""}||${e.end_date ?? ""}`;
     const groups = new Map<string, typeof filteredEvents>();
     for (const e of filteredEvents) {
-      const k = dedupKey(e);
+      const k = timelineGroupKey(e);
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k)!.push(e);
     }
@@ -283,6 +285,7 @@ export default function App() {
                 manualVisibilityLevel={manualVisibilityLevel}
                 onVisibilityLevelChange={setManualVisibilityLevel}
                 showOngoingTail={showOngoingTail}
+                ongoingCount={events.filter(hasOngoingSegment).length}
                 onToggleOngoingTail={() => setShowOngoingTail(v => !v)}
                 tooltipTransparent={tooltipTransparent}
                 onToggleTooltipTransparent={() => setTooltipTransparent(v => !v)}
