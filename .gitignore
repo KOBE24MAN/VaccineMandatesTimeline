@@ -15,8 +15,3 @@ build/
 *.swo
 ~$*
 .DS_Store
-
-# Frontend dependencies and test/build output
-node_modules/
-*.tsbuildinfo
-frontend_client/.test-output/
