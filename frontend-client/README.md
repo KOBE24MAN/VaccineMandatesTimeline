@@ -50,8 +50,10 @@ of silently substituting data.
 
 To link a booster to an original mandate, set the original's `booster_id` to the
 booster row's `id`. Its timeline segment overlays the original row. Hover cards
-and the detail panel include the original's information followed by the linked
-booster's information, with `(ID:123) Policy Name` headings.
+keep concise phase/date summaries, with a linked booster summary
+below the original. The information panel keeps the original field order and
+compact layout, with the complete booster record below the original. Both use
+`(ID:123) Policy Name` headings.
 
 Name and policy-target fuzzy searches update the displayed results as you type.
 Each query matches its own field; when both are filled, a record must match both.

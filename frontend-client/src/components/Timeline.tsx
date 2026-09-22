@@ -2,7 +2,7 @@ import { useRef, useEffect, useLayoutEffect, useState, useMemo, useCallback } fr
 import * as d3 from "d3";
 import type { EventIndex, Region, NotableEvent } from "../types/event";
 import { ALL_REGIONS } from "../types/event";
-import { MandateDetails } from "./MandateDetails";
+import { MandateTooltip } from "./MandateTooltip";
 import { mandateHeading } from "../utils/mandateDetails";
 import { parseDate, yearsBetween } from "../utils/dates";
 import { visualStartDate, visualEndDate, hasOngoingSegment, timelineGroupKey } from "../utils/timeline";
@@ -112,30 +112,14 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [dims, setDims] = useState({ width: 800, height: 500 });
   const tooltipRef = useRef<HTMLDivElement>(null);
-  const tooltipCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cancelTooltipClose = useCallback(() => {
-    if (tooltipCloseTimer.current !== null) clearTimeout(tooltipCloseTimer.current);
-    tooltipCloseTimer.current = null;
-  }, []);
-  const closeTooltip = useCallback(() => {
-    cancelTooltipClose();
-    setTooltip(null);
-  }, [cancelTooltipClose]);
-  const scheduleTooltipClose = useCallback(() => {
-    cancelTooltipClose();
-    // Allow the pointer to cross the small gap between a bar and its scrollable card.
-    tooltipCloseTimer.current = setTimeout(() => setTooltip(null), 250);
-  }, [cancelTooltipClose]);
+  const closeTooltip = useCallback(() => setTooltip(null), []);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeTooltip();
     };
     document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      cancelTooltipClose();
-    };
-  }, [closeTooltip, cancelTooltipClose]);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [closeTooltip]);
   useEffect(() => { closeTooltip(); }, [events, windowStart, windowEnd, closeTooltip]);
   const tooltipEvents = tooltip?.event.mergedIds
     ? tooltip.event.mergedIds.flatMap(id => {
@@ -589,22 +573,24 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
             .attr("width", Math.max((ev.ongoing ? MARGIN.left + innerW : visualX2raw) - visualX1, 3)).attr("height", barH)
             .attr("rx", rx).attr("fill", "transparent").attr("cursor", "pointer")
             .on("mouseenter", (e: MouseEvent) => {
-              cancelTooltipClose();
               g.attr("opacity", 1);
               outline.attr("stroke-width", 2).attr("stroke-opacity", 1);
+              const r = svgEl.getBoundingClientRect();
+              setTooltip({ x: e.clientX - r.left, y: e.clientY - r.top, event: ev });
+            })
+            .on("mousemove", (e: MouseEvent) => {
               const r = svgEl.getBoundingClientRect();
               setTooltip({ x: e.clientX - r.left, y: e.clientY - r.top, event: ev });
             })
             .on("mouseleave", () => {
               g.attr("opacity", 1);
               outline.attr("stroke-width", 1).attr("stroke-opacity", 0.5);
-              scheduleTooltipClose();
+              closeTooltip();
             })
             .on("focus", () => {
-              cancelTooltipClose();
               setTooltip({ x: Math.max(MARGIN.left, visualX1), y: barY + barH / 2, event: ev });
             })
-            .on("blur", scheduleTooltipClose)
+            .on("blur", closeTooltip)
             .on("keydown", (e: KeyboardEvent) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -852,7 +838,7 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
       .attr("fill", "none").attr("stroke", "#9CA3AF").attr("stroke-width", 0.5);
 
     prevEventIdsRef.current = currentEventIds;
-  }, [layout, events, windowStart, windowEnd, dims, isDetail, notableEvents, showNotableLabels, showOngoingTail, selectedEventId, cancelTooltipClose, scheduleTooltipClose, closeTooltip]);
+  }, [layout, events, windowStart, windowEnd, dims, isDetail, notableEvents, showNotableLabels, showOngoingTail, selectedEventId, closeTooltip]);
 
   return (
     <div ref={containerRef} className="flex-1 overflow-hidden relative bg-white">
@@ -862,38 +848,20 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
         <div
           ref={tooltipRef}
           role="tooltip"
-          aria-label="Mandate details"
-          tabIndex={0}
-          onMouseEnter={cancelTooltipClose}
-          onMouseLeave={scheduleTooltipClose}
-          onFocus={cancelTooltipClose}
-          onBlur={scheduleTooltipClose}
-          onWheel={event => event.stopPropagation()}
-          className={`absolute z-10 pointer-events-auto border rounded-lg p-3 text-xs overflow-y-auto overscroll-contain transition-colors ${
+          aria-label="Mandate summary"
+          className={`absolute z-10 pointer-events-none border rounded-lg p-3 text-xs max-w-xs transition-colors ${
             tooltipTransparent
               ? "bg-white/50 backdrop-blur-sm border-gray-200/60 shadow-sm"
               : "bg-white border-gray-200 shadow-lg"
           }`}
           style={{
-            // Fit to one side of the pointer so the card never covers the bar's
-            // click target, including when the information panel narrows the chart.
-            width: Math.max(0, Math.min(420, dims.width - 16,
-              Math.max(tooltip.x - 22, dims.width - tooltip.x - 22))),
-            maxHeight: Math.max(0, Math.min(520, dims.height - 16)),
+            width: Math.max(0, Math.min(320, dims.width - 16)),
             left: tooltip.x + 14,
             top: tooltip.y - 8,
           }}
         >
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <p className="text-gray-500">{tooltipEvents.length > 1 ? `${tooltipEvents.length} grouped mandates · ` : ""}Scroll for all details</p>
-            <button type="button" onClick={closeTooltip} aria-label="Close mandate tooltip"
-              className="text-gray-400 hover:text-gray-700 text-lg leading-none">&times;</button>
-          </div>
-          <div className="space-y-3">
-            {tooltipEvents.map(event => (
-              <MandateDetails key={event.id} event={event} color={REGION_COLOR[event.region] ?? "#5a84ff"} />
-            ))}
-          </div>
+          <MandateTooltip events={tooltipEvents} color={REGION_COLOR[tooltip.event.region] ?? "#5a84ff"}
+            transparent={tooltipTransparent} />
         </div>
       )}
     </div>

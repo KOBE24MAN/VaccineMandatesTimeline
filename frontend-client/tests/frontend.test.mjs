@@ -185,3 +185,41 @@ test("information cards show original then full booster with IDs and preserved n
   assert.equal(mapToIndex(original, noDates).booster, null);
   assert.equal(mapToIndex(original, noDates).boosterRecord.id, booster.id);
 });
+
+test("hover summary keeps the original phases and only adds a linked booster summary", async () => {
+  const { MandateTooltip } = await server.ssrLoadModule("/src/components/MandateTooltip.tsx");
+  const records = await store.loadMandates();
+  const byId = new Map(records.map(record => [record.id, record]));
+  const event = mapToIndex(byId.get("2"), byId);
+  const withDetails = { ...event,
+    record: { ...event.record, compliance: "FULL_ORIGINAL_COMPLIANCE", notes: "FULL_ORIGINAL_NOTES" },
+    boosterRecord: { ...event.boosterRecord, compliance: "FULL_BOOSTER_COMPLIANCE" },
+  };
+  const html = renderToStaticMarkup(React.createElement(MandateTooltip, {events:[withDetails], color:"#2563EB"}));
+  assert.ok(html.indexOf("(ID:2)") < html.indexOf("(ID:38)"));
+  for (const text of ["Announced → effective", "Effective → enforcement", "Enforcement → removal", "2022-01-13", "2022-11-04"]) assert.ok(html.includes(text), text);
+  for (const text of ["FULL_ORIGINAL_COMPLIANCE", "FULL_ORIGINAL_NOTES", "FULL_BOOSTER_COMPLIANCE", "data-mandate-detail-id", "Scroll for all details"]) assert.ok(!html.includes(text), text);
+  const noBooster = renderToStaticMarkup(React.createElement(MandateTooltip, {events:[{ ...withDetails, booster:null, boosterRecord:undefined }], color:"#2563EB"}));
+  assert.ok(!noBooster.includes("data-tooltip-booster-id"));
+});
+
+test("information sections follow the previous layout and groups keep compact summaries", async () => {
+  const { MandateDetails, MandateSummary } = await server.ssrLoadModule("/src/components/MandateDetails.tsx");
+  const records = await store.loadMandates();
+  const byId = new Map(records.map(record => [record.id, record]));
+  const event = mapToDetail(byId.get("2"), byId);
+  const html = renderToStaticMarkup(React.createElement(MandateDetails, {event, color:"#2563EB"}));
+  const first = html.split('data-mandate-detail-id="38"')[0];
+  let previous = -1;
+  for (const field of ["id", "name", "jurisdiction", "type", "announcement_date", "effective_date", "enforcement_date", "removal_date", "target", "compliance", "exemptions", "enforcement_measures", "executive_orders", "removal_method", "removal_details", "communications", "vaccine_eligibility_info", "vaccine_availability_info", "ATAGI", "uptake", "popu_info", "notes", "source", "authority", "ref_code", "ref_no"]) {
+    const position = first.indexOf(`data-mandate-field="${field}"`);
+    if (position < 0) continue; // Empty source fields are omitted.
+    assert.ok(position > previous, `${field} in the original display order`);
+    previous = position;
+  }
+  assert.ok(!html.includes("Name/Version"));
+  const summary = renderToStaticMarkup(React.createElement(MandateSummary, {event,color:"#2563EB",onSelect:()=>{}}));
+  assert.ok(summary.indexOf('data-mandate-summary-id="2"') < summary.indexOf('data-mandate-summary-id="38"'));
+  assert.ok(summary.includes("View full details"));
+  assert.ok(!summary.includes('data-mandate-field="compliance"'));
+});

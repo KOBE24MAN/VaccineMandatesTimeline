@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import type { EventIndex, EventDetail as EventDetailType } from "../types/event";
 import { REGION_COLOR } from "./Timeline";
-import { MandateDetails } from "./MandateDetails";
-import { mandateHeading } from "../utils/mandateDetails";
+import { MandateDetails, MandateSummary } from "./MandateDetails";
 
 interface Props {
   eventId: string | null;
@@ -67,17 +66,10 @@ export function EventDetail({ eventId, groupIds, events, fetchDetail, onClose, o
           </div>
         )}
 
-        {/* Grouped policies retain their own source fields and linked booster. */}
+        {/* Group view — compact cards, with full records available on selection. */}
         {groupIds && groupEvents.map(ev => (
-          <div key={ev.id} className="space-y-2">
-            <MandateDetails event={ev} color={REGION_COLOR[ev.region] ?? "#5a84ff"} />
-            <button onClick={() => onSelectFromGroup(ev.id)}
-              aria-label={`Select ${mandateHeading(ev.id, ev.title)}`}
-              className="w-full text-right text-xs font-semibold px-3 py-1.5 rounded border border-black/10 hover:bg-gray-50"
-              style={{ color: REGION_COLOR[ev.region] ?? "#5a84ff" }}>
-              Select this mandate →
-            </button>
-          </div>
+          <MandateSummary key={ev.id} event={ev} color={REGION_COLOR[ev.region] ?? "#5a84ff"}
+            onSelect={() => onSelectFromGroup(ev.id)} />
         ))}
 
         {/* Single event view — full detail card */}
