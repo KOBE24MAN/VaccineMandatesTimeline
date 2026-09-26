@@ -46,6 +46,11 @@ export interface SearchResult {
   snippet: string | null;
 }
 
+export interface MandateFilters {
+  name?: string;
+  target?: string;
+}
+
 const textFields = [
   "name", "type", "target", "target_category", "announcement_date",
   "effective_date", "enforcement_date", "removal_date", "booster_id",
@@ -147,6 +152,19 @@ export function parseNotableEvents(csv: string): Omit<NotableEvent, "display_dat
       description: clean(row.description), source: clean(row.source),
     };
   }).sort((a, b) => compare(a.event_date, b.event_date) || a.id - b.id);
+}
+
+/** Match each query only against its named field, including booster records. */
+export function filterMandates(
+  mandates: readonly Mandate[],
+  { name = "", target = "" }: MandateFilters,
+): Mandate[] {
+  const nameQuery = name.trim();
+  const targetQuery = target.trim();
+  return mandates.filter(mandate =>
+    (!nameQuery || Number.isFinite(nameMatchScore(mandate.name ?? "", nameQuery))) &&
+    (!targetQuery || Number.isFinite(nameMatchScore(mandate.target ?? "", targetQuery))),
+  );
 }
 
 export function searchDataset(mandates: readonly Mandate[], query: string): SearchResult[] {

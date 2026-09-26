@@ -1,5 +1,8 @@
 import { motion, AnimatePresence } from "framer-motion";
 import type { EventIndex } from "../types/event";
+import { MandateDetails } from "./MandateDetails";
+import { REGION_COLOR } from "./Timeline";
+import { mandateHeading } from "../utils/mandateDetails";
 
 interface Props {
   ids: string[] | null;
@@ -27,7 +30,7 @@ export function GroupPanel({ ids, events, onSelectEvent, onClose }: Props) {
           <div className="flex items-center justify-between p-4 border-b">
             <div>
               <h2 className="text-lg font-semibold">
-                {groupEvents[0]?.title ?? "Grouped Policies"}
+                Grouped Policies
               </h2>
               <p className="text-xs text-gray-400 mt-0.5">
                 {groupEvents.length} linked {groupEvents.length === 1 ? "entry" : "entries"}
@@ -35,6 +38,7 @@ export function GroupPanel({ ids, events, onSelectEvent, onClose }: Props) {
             </div>
             <button
               onClick={onClose}
+              aria-label="Close grouped policies"
               className="text-gray-400 hover:text-gray-700 text-2xl leading-none"
             >
               &times;
@@ -43,19 +47,15 @@ export function GroupPanel({ ids, events, onSelectEvent, onClose }: Props) {
 
           <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
             {groupEvents.map(ev => (
-              <button
-                key={ev.id}
-                onClick={() => onSelectEvent(ev.id)}
-                className="w-full text-left p-4 hover:bg-gray-50 transition-colors"
-              >
-                <p className="text-sm font-medium text-gray-800 mb-1">
-                  {ev.short_description || "No description"}
-                </p>
-                <p className="text-xs text-gray-400">
-                  {ev.type} · {ev.start_date}
-                  {ev.end_date ? ` → ${ev.end_date}` : " (ongoing)"}
-                </p>
-              </button>
+              <div key={ev.id} className="p-3 space-y-2">
+                <MandateDetails event={ev} color={REGION_COLOR[ev.region] ?? "#5a84ff"} />
+                <button
+                  onClick={() => onSelectEvent(ev.id)}
+                  aria-label={`Select ${mandateHeading(ev.id, ev.title)}`}
+                  className="w-full text-right px-3 py-1.5 rounded border border-gray-200 text-xs font-semibold hover:bg-gray-50"
+                  style={{ color: REGION_COLOR[ev.region] ?? "#5a84ff" }}
+                >Select this mandate →</button>
+              </div>
             ))}
           </div>
         </motion.div>

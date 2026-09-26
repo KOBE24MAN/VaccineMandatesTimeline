@@ -1,8 +1,6 @@
-import { useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import type { Region, EventType, Category, NotableEvent } from "../types/event";
-import { ALL_REGIONS, ALL_EVENT_TYPES, ALL_CATEGORIES } from "../types/event";
-import { searchMandates } from "../data/store";
+import type { Region, EventType, NotableEvent } from "../types/event";
+import { ALL_REGIONS, ALL_EVENT_TYPES } from "../types/event";
+import type { Mandate } from "../data/dataset";
 import { REGION_COLOR } from "./Timeline";
 
 interface Props {
@@ -14,19 +12,20 @@ interface Props {
   onClearAllRegions: () => void;
   onSelectAllTypes: () => void;
   onClearAllTypes: () => void;
-  activeCategories: Set<Category>;
-  onToggleCategory: (cat: Category) => void;
-  onSelectAllCategories: () => void;
-  onClearAllCategories: () => void;
-  onEnterCategoryMode: () => void;
+  nameQuery: string;
+  targetQuery: string;
+  onNameQueryChange: (query: string) => void;
+  onTargetQueryChange: (query: string) => void;
+  searchResults: Mandate[];
+  isSearching: boolean;
   windowStart: Date;
   windowEnd: Date;
   fullStart: Date;
   fullEnd: Date;
   onWindowChange: (start: Date, end: Date) => void;
-  autoVisibilityLevel: number;
-  manualVisibilityLevel: number | null;
-  onVisibilityLevelChange: (level: number | null) => void;
+  autoVisibilityPercent: number;
+  manualVisibilityPercent: number | null;
+  onVisibilityPercentChange: (percent: number | null) => void;
   showOngoingTail: boolean;
   ongoingCount: number;
   onToggleOngoingTail: () => void;
@@ -62,19 +61,20 @@ export function FilterBar({
   onClearAllRegions,
   onSelectAllTypes,
   onClearAllTypes,
-  activeCategories,
-  onToggleCategory,
-  onSelectAllCategories,
-  onClearAllCategories,
-  onEnterCategoryMode,
+  nameQuery,
+  targetQuery,
+  onNameQueryChange,
+  onTargetQueryChange,
+  searchResults,
+  isSearching,
   windowStart,
   windowEnd,
   fullStart,
   fullEnd,
   onWindowChange,
-  autoVisibilityLevel,
-  manualVisibilityLevel,
-  onVisibilityLevelChange,
+  autoVisibilityPercent,
+  manualVisibilityPercent,
+  onVisibilityPercentChange,
   showOngoingTail,
   ongoingCount,
   onToggleOngoingTail,
@@ -96,47 +96,6 @@ export function FilterBar({
   onToggleMultiNotableSelect,
   onSearchResultClick,
 }: Props) {
-  const [categoryMode, setCategoryMode] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<{ id: string; jurisdiction: string; name: string | null; type: string | null; snippet: string | null }[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const searchRevision = useRef(0);
-
-  function handleSearch(q: string) {
-    const revision = ++searchRevision.current;
-    setSearchQuery(q);
-    if (!q.trim()) { setSearchResults([]); setSearchLoading(false); return; }
-    setSearchLoading(true);
-    searchMandates(q)
-      .then(results => {
-        if (revision !== searchRevision.current) return;
-        setSearchResults(results);
-        setSearchLoading(false);
-      })
-      .catch(() => {
-        if (revision !== searchRevision.current) return;
-        setSearchResults([]);
-        setSearchLoading(false);
-      });
-  }
-
-  function enterCategoryMode() {
-    onEnterCategoryMode();
-    setCategoryMode(true);
-  }
-
-  function exitCategoryMode() {
-    onSelectAllTypes();
-    onSelectAllCategories();
-    setCategoryMode(false);
-  }
-
-  const slideVariants = {
-    hidden: { height: 0, opacity: 0 },
-    visible: { height: "auto", opacity: 1, transition: { duration: 0.28, ease: [0.4, 0, 0.2, 1] } },
-    exit:   { height: 0, opacity: 0,    transition: { duration: 0.22, ease: [0.4, 0, 1, 1] } },
-  };
-
   return (
     <div className="flex flex-col gap-5 p-4">
       <p className="text-center text-base font-bold text-gray-800 mt-1">Filter bar</p>
@@ -169,61 +128,18 @@ export function FilterBar({
             className="w-full border border-gray-300 rounded px-2 py-1 text-sm text-gray-700"
           />
         </div>
-        <div className="flex items-center justify-between mt-2">
+        <div className="flex items-center justify-between gap-2 mt-2">
           <button
             onClick={onResetWindow}
             className="text-xs text-blue-500 hover:underline"
           >
             Reset
           </button>
-          <div className="flex items-center gap-2">
-            {(() => {
-              // Representative window sizes (days) for each visibility level 1–6
-              const LEVEL_DAYS = [1460, 912, 549, 270, 135, 60];
-              const MS = 24 * 60 * 60 * 1000;
-              const windowDays = (windowEnd.getTime() - windowStart.getTime()) / MS;
-              const currentLevel =
-                windowDays > 1095 ? 1 :
-                windowDays > 730  ? 2 :
-                windowDays > 365  ? 3 :
-                windowDays > 180  ? 4 :
-                windowDays > 90   ? 5 : 6;
-
-              function stepTo(level: number) {
-                const days = LEVEL_DAYS[level - 1];
-                const center = (windowStart.getTime() + windowEnd.getTime()) / 2;
-                const half = (days / 2) * MS;
-                onWindowChange(new Date(center - half), new Date(center + half));
-              }
-
-              function formatWindowSize(days: number): string {
-                if (days >= 365 * 1.5) return `${Math.round(days / 365)}y`;
-                if (days >= 60) return `${Math.round(days / 30)}mo`;
-                return `${Math.round(days)}d`;
-              }
-
-              return (
-                <>
-                  <button
-                    onClick={() => stepTo(Math.max(currentLevel - 1, 1))}
-                    disabled={currentLevel <= 1}
-                    className="w-7 h-7 flex items-center justify-center rounded border border-gray-300 text-gray-600 text-base hover:border-blue-400 hover:text-blue-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                    title="Zoom out (fewer events)"
-                  >−</button>
-                  <span className="text-xs text-gray-400">{formatWindowSize(windowDays)}</span>
-                  <button
-                    onClick={() => stepTo(Math.min(currentLevel + 1, 6))}
-                    disabled={currentLevel >= 6}
-                    className="w-7 h-7 flex items-center justify-center rounded border border-gray-300 text-gray-600 text-base hover:border-blue-400 hover:text-blue-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                    title="Zoom in (more events)"
-                  >+</button>
-                </>
-              );
-            })()}
-          </div>
+          <span className="text-[11px] text-gray-400 text-right">Wheel: zoom · Middle-drag: pan</span>
         </div>
       </div>
 
+      <fieldset disabled={isSearching} className="flex flex-col gap-5 disabled:opacity-50">
       {/* Jurisdiction */}
       <div>
         <div className="flex items-center justify-between mb-2">
@@ -254,117 +170,96 @@ export function FilterBar({
         </div>
       </div>
 
-      {/* Mandate type + category toggle */}
+      {/* Mandate type */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Mandate Event</p>
-          <AnimatePresence initial={false}>
-            {!categoryMode && (
-              <motion.div
-                className="flex gap-2"
-                variants={slideVariants} initial="hidden" animate="visible" exit="exit"
-              >
-                <button onClick={onSelectAllTypes} className="text-xs text-blue-500 hover:underline">All</button>
-                <button onClick={onClearAllTypes} className="text-xs text-blue-500 hover:underline">Clear</button>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          <div className="flex gap-2">
+            <button onClick={onSelectAllTypes} className="text-xs text-blue-500 hover:underline">All</button>
+            <button onClick={onClearAllTypes} className="text-xs text-blue-500 hover:underline">Clear</button>
+          </div>
         </div>
-
-        {/* Type buttons — hidden in category mode */}
-        <AnimatePresence initial={false}>
-          {!categoryMode && (
-            <motion.div
-              className="flex flex-col gap-1.5 overflow-hidden"
-              variants={slideVariants} initial="hidden" animate="visible" exit="exit"
-            >
-              {ALL_EVENT_TYPES.map((type) => (
-                <button
-                  key={type}
-                  onClick={() => onToggleType(type)}
-                  className={`px-3 py-1.5 rounded text-sm border text-left transition-colors ${
-                    activeTypes.has(type)
-                      ? "bg-indigo-600 text-white border-indigo-600"
-                      : "bg-white text-gray-500 border-gray-300 hover:border-indigo-400 hover:text-indigo-600"
-                  }`}
-                >
-                  {type}
-                </button>
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Toggle button */}
-        <button
-          onClick={categoryMode ? exitCategoryMode : enterCategoryMode}
-          className={`mt-2 w-full px-3 py-1.5 rounded text-sm border text-left transition-colors flex items-center justify-between ${
-            categoryMode
-              ? "bg-indigo-600 text-white border-indigo-600"
-              : "bg-white text-gray-500 border-gray-300 hover:border-indigo-400 hover:text-indigo-600"
-          }`}
-        >
-          <span>Filter by category</span>
-          <span className="text-xs opacity-70">{categoryMode ? "▲" : "▼"}</span>
-        </button>
-
-        {/* Category pills — shown in category mode */}
-        <AnimatePresence initial={false}>
-          {categoryMode && (
-            <motion.div
-              className="overflow-hidden"
-              variants={slideVariants} initial="hidden" animate="visible" exit="exit"
-            >
-              <div className="flex items-center justify-between mt-3 mb-2">
-                <p className="text-xs text-gray-400 uppercase tracking-wide">Categories</p>
-                <div className="flex gap-2">
-                  <button onClick={onSelectAllCategories} className="text-xs text-blue-500 hover:underline">All</button>
-                  <button onClick={onClearAllCategories} className="text-xs text-blue-500 hover:underline">Clear</button>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {ALL_CATEGORIES.map(cat => {
-                  const active = activeCategories.has(cat);
-                  const label = cat.replace(/_/g, " ");
-                  return (
-                    <button
-                      key={cat}
-                      onClick={() => onToggleCategory(cat)}
-                      className={`px-2.5 py-0.5 rounded-full text-xs border transition-colors ${
-                        active
-                          ? "bg-indigo-600 text-white border-indigo-600"
-                          : "bg-white text-gray-500 border-gray-300 hover:border-indigo-400 hover:text-indigo-600"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div className="flex flex-col gap-1.5">
+          {ALL_EVENT_TYPES.map(type => (
+            <button key={type} onClick={() => onToggleType(type)}
+              className={`px-3 py-1.5 rounded text-sm border text-left transition-colors ${activeTypes.has(type)
+                ? "bg-indigo-600 text-white border-indigo-600"
+                : "bg-white text-gray-500 border-gray-300 hover:border-indigo-400 hover:text-indigo-600"}`}>
+              {type}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Visibility level */}
+      </fieldset>
+
+      {/* Full-dataset, field-specific fuzzy search */}
       <div>
-        <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Visibility level</p>
-        <select
-          value={manualVisibilityLevel ?? "auto"}
-          onChange={e => {
-            const v = e.target.value;
-            onVisibilityLevelChange(v === "auto" ? null : Number(v));
-          }}
-          className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-700 bg-white"
-        >
-          <option value="auto">Auto (Level {autoVisibilityLevel})</option>
-          {[1, 2, 3, 4, 5, 6].map(n => (
-            <option key={n} value={n}>Level {n}{n === 1 ? " — fewest" : n === 6 ? " — all" : ""}</option>
+        <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Search policies</p>
+        <div className="flex flex-col gap-3">
+          {[{ label: "Name", value: nameQuery, update: onNameQueryChange },
+            { label: "Target", value: targetQuery, update: onTargetQueryChange }].map(field => (
+            <div key={field.label}>
+              <label htmlFor={`search-${field.label.toLowerCase()}`} className="block text-xs text-gray-500 mb-1">{field.label}</label>
+              <div className="flex gap-1.5 items-center">
+                <input id={`search-${field.label.toLowerCase()}`} type="search" value={field.value}
+                  onChange={event => field.update(event.target.value)} placeholder={`Search by ${field.label.toLowerCase()}…`}
+                  className="min-w-0 flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-700 focus:outline-none focus:border-indigo-400" />
+                <button onClick={() => field.update("")} disabled={!field.value} aria-label={`Clear ${field.label.toLowerCase()} search`}
+                  className="text-xs text-blue-500 hover:underline disabled:text-gray-300 disabled:no-underline">Clear</button>
+              </div>
+            </div>
           ))}
-        </select>
-        {manualVisibilityLevel !== null && (
+        </div>
+        <p className="mt-2 text-xs text-gray-400 leading-relaxed">Search all policies, including boosters. Both fields must match when used together.</p>
+        {isSearching && (
+          <div className="mt-2">
+            <p role="status" className="text-xs text-gray-500 mb-1.5">{searchResults.length} matching {searchResults.length === 1 ? "record" : "records"}</p>
+            <div className="flex flex-col gap-1 max-h-48 overflow-y-auto" aria-label="Matching policies">
+              {searchResults.length === 0 && <p className="text-xs text-gray-400 px-1">No matching policies. Try another name or target.</p>}
+              {searchResults.map(record => (
+                <button key={record.id} onClick={() => onSearchResultClick(record.id)} data-search-result-id={record.id}
+                  className="text-left px-2 py-1.5 rounded border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 transition-colors">
+                  <p className="text-xs font-semibold text-gray-700 leading-snug">(ID:{record.id}) {record.name ?? record.id}</p>
+                  <p className="text-[10px] text-gray-400">{record.jurisdiction} · {record.type}</p>
+                  {record.target && <p className="text-[10px] text-gray-500 mt-0.5 leading-snug line-clamp-2">{record.target}</p>}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Visibility percentage */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Visibility</p>
+          <span className="text-xs font-medium text-indigo-600">
+            {manualVisibilityPercent === null ? "Auto" : "Manual"} · {Math.round(manualVisibilityPercent ?? autoVisibilityPercent)}%
+          </span>
+        </div>
+        <input
+          type="range"
+          min={10}
+          max={100}
+          step={5}
+          disabled={isSearching}
+          value={manualVisibilityPercent ?? autoVisibilityPercent}
+          onChange={event => onVisibilityPercentChange(Number(event.target.value))}
+          aria-label="Timeline visibility percentage"
+          className="w-full accent-indigo-600 disabled:opacity-50"
+        />
+        <div className="flex justify-between text-[10px] text-gray-400 -mt-0.5">
+          <span>10%</span>
+          <span>100% · all records</span>
+        </div>
+        <p className="mt-1.5 text-xs text-gray-400 leading-relaxed">
+          Percentage of filtered records shown. Auto follows the timeline zoom.
+        </p>
+        {isSearching && <p className="mt-1 text-xs text-gray-400">All matching policies are shown while searching.</p>}
+        {manualVisibilityPercent !== null && !isSearching && (
           <button
-            onClick={() => onVisibilityLevelChange(null)}
+            onClick={() => onVisibilityPercentChange(null)}
             className="mt-1.5 text-xs text-blue-500 hover:underline"
           >
             Reset to auto
@@ -450,37 +345,6 @@ export function FilterBar({
       <div>
         <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Experimental</p>
         <div className="flex flex-col gap-3">
-
-          {/* Search */}
-          <div>
-            <p className="text-xs text-gray-400 mb-1.5">Search mandates</p>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => handleSearch(e.target.value)}
-              placeholder="Keyword…"
-              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-700 focus:outline-none focus:border-indigo-400"
-            />
-            {searchQuery.trim() && (
-              <div className="mt-1.5 flex flex-col gap-1 max-h-48 overflow-y-auto">
-                {searchLoading && <p className="text-xs text-gray-400 px-1">Searching…</p>}
-                {!searchLoading && searchResults.length === 0 && (
-                  <p className="text-xs text-gray-400 px-1">No results</p>
-                )}
-                {searchResults.map(r => (
-                  <button
-                    key={r.id}
-                    onClick={() => onSearchResultClick(r.id)}
-                    className="text-left px-2 py-1.5 rounded border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 transition-colors"
-                  >
-                    <p className="text-xs font-semibold text-gray-700 leading-snug">{r.name ?? r.id}</p>
-                    <p className="text-[10px] text-gray-400">{r.jurisdiction} · {r.type}</p>
-                    {r.snippet && <p className="text-[10px] text-gray-500 mt-0.5 leading-snug italic">…{r.snippet}…</p>}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
 
           {/* Toggles */}
           <label className="flex items-center justify-between cursor-pointer select-none">

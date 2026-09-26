@@ -9,35 +9,65 @@ import { Minimap } from "./components/Minimap";
 import { EventDetail } from "./components/EventDetail";
 import { GroupPanel } from "./components/GroupPanel";
 import { parseDate } from "./utils/dates";
-import { hasOngoingSegment, timelineGroupKey } from "./utils/timeline";
+import { hasOngoingSegment, timelineGroupKey, visualStartDate, visualEndDate } from "./utils/timeline";
+import { filterMandates } from "./data/dataset";
+import { searchTimelineEvents } from "./utils/search";
+
+const VISIBILITY_ANCHORS = [
+  { days: 1460, percent: 35 },
+  { days: 912, percent: 45 },
+  { days: 549, percent: 60 },
+  { days: 270, percent: 75 },
+  { days: 135, percent: 90 },
+  { days: 60, percent: 100 },
+] as const;
+
+function continuousVisibilityPercent(windowDays: number): number {
+  if (windowDays >= VISIBILITY_ANCHORS[0].days) return VISIBILITY_ANCHORS[0].percent;
+  if (windowDays <= VISIBILITY_ANCHORS[VISIBILITY_ANCHORS.length - 1].days) return 100;
+  for (let index = 0; index < VISIBILITY_ANCHORS.length - 1; index += 1) {
+    const wider = VISIBILITY_ANCHORS[index];
+    const narrower = VISIBILITY_ANCHORS[index + 1];
+    if (windowDays <= wider.days && windowDays >= narrower.days) {
+      const progress = (Math.log(wider.days) - Math.log(windowDays)) /
+        (Math.log(wider.days) - Math.log(narrower.days));
+      return wider.percent + progress * (narrower.percent - wider.percent);
+    }
+  }
+  return 100;
+}
 
 export default function App() {
-  const { events, totalRecords, loading, error, fetchDetail } = useEvents();
+  const { events, allRecords, dateIssueRecords, totalRecords, loading, error, fetchDetail } = useEvents();
   const notableEvents = useNotableEvents();
   const [activeNotableEventIds, setActiveNotableEventIds] = useState<Set<number>>(new Set());
   const {
     activeRegions,
     activeTypes,
-    activeCategories,
     filteredEvents,
     toggleRegion,
     toggleType,
-    toggleCategory,
     selectAllRegions,
     clearAllRegions,
     selectAllTypes,
     clearAllTypes,
-    selectAllCategories,
-    clearAllCategories,
     isolateRegion,
-    enterCategoryMode,
   } = useFilters(events);
 
+  const [nameQuery, setNameQuery] = useState("");
+  const [targetQuery, setTargetQuery] = useState("");
+  const isSearching = Boolean(nameQuery.trim() || targetQuery.trim());
+  const searchResults = useMemo(() => filterMandates(allRecords, { name: nameQuery, target: targetQuery }),
+    [allRecords, nameQuery, targetQuery]);
+  const searchEvents = useMemo(() => searchTimelineEvents(searchResults, allRecords), [searchResults, allRecords]);
+  const timelineRegions = useMemo(() => isSearching
+    ? new Set(searchEvents.map(event => event.region)) : activeRegions, [isSearching, searchEvents, activeRegions]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [groupedEventIds, setGroupedEventIds] = useState<string[] | null>(null);
+  const [returnGroupIds, setReturnGroupIds] = useState<string[] | null>(null);
   const [showFilter, setShowFilter] = useState(true);
-  const [showDetail, setShowDetail] = useState(true);
-  const [manualVisibilityLevel, setManualVisibilityLevel] = useState<number | null>(null);
+  const [showDetail, setShowDetail] = useState(() => window.innerWidth >= 960);
+  const [manualVisibilityPercent, setManualVisibilityPercent] = useState<number | null>(null);
   const [showOngoingTail, setShowOngoingTail] = useState(true);
   const [showNotableLabels, setShowNotableLabels] = useState(true);
   const [tooltipTransparent, setTooltipTransparent] = useState(false);
@@ -58,49 +88,56 @@ export default function App() {
   const effectiveWindowRef = useRef<{ start: Date; end: Date } | null>(null);
 
   function handleEventClick(id: string) {
+    setReturnGroupIds(null);
     setGroupedEventIds(null);
     setSelectedEventId(id);
     setShowDetail(true);
   }
 
   function handleEventDoubleClick(id: string) {
-    const ev = events.find(e => e.id === id);
-    if (ev) isolateRegion(ev.region);
+    const ev = (isSearching ? searchEvents : events).find(e => e.id === id);
+    if (ev && !isSearching) isolateRegion(ev.region);
   }
 
   function handleSearchResultClick(id: string) {
-    const ev = events.find(e => e.id === id);
-    if (!ev) {
-      setGroupedEventIds(null);
-      setSelectedEventId(id);
-      setShowDetail(true);
-      return;
+    setReturnGroupIds(null);
+    const ev = searchEvents.find(event => event.id === id || event.booster?.id === id);
+    if (ev) {
+      const first = visualStartDate(ev);
+      const last = visualEndDate(ev) ?? first;
+      if (first && last) {
+        const start = parseDate(first).getTime();
+        const end = parseDate(last).getTime();
+        const padding = Math.max((end - start) * 0.1, 14 * 86_400_000);
+        setWindowStart(new Date(start - padding));
+        setWindowEnd(new Date(end + padding));
+      }
     }
-
-    // Isolate region (same as double-tap)
-    isolateRegion(ev.region);
-
-    // Position start date ~15% from the left over a 180-day window
-    const DAY = 24 * 60 * 60 * 1000;
-    const startMs = parseDate(ev.announcement_date ?? ev.start_date).getTime();
-    setWindowStart(new Date(startMs - 25 * DAY));
-    setWindowEnd(new Date(startMs + 155 * DAY));
-
-    // Select and open detail
     setGroupedEventIds(null);
     setSelectedEventId(id);
     setShowDetail(true);
   }
 
   function handleGroupClick(ids: string[]) {
+    setReturnGroupIds(null);
     setSelectedEventId(null);
     setGroupedEventIds(ids);
     setShowDetail(true);
   }
 
   function handleSelectFromGroup(id: string) {
+    setReturnGroupIds(groupedEventIds ? [...groupedEventIds] : null);
     setGroupedEventIds(null);
-    handleEventClick(id);
+    setSelectedEventId(id);
+    setShowDetail(true);
+  }
+
+  function handleBackToGroup() {
+    if (!returnGroupIds) return;
+    setSelectedEventId(null);
+    setGroupedEventIds(returnGroupIds);
+    setReturnGroupIds(null);
+    setShowDetail(true);
   }
 
   // Derive the full date extent from all loaded events
@@ -128,7 +165,11 @@ export default function App() {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   }
 
+  const introFrame = useRef<number | null>(null);
+  useEffect(() => () => { if (introFrame.current !== null) cancelAnimationFrame(introFrame.current); }, []);
+
   const runIntroAnimation = useCallback((fromStart: number, fromEnd: number) => {
+    if (introFrame.current !== null) cancelAnimationFrame(introFrame.current);
     const targetStart = new Date("2021-06-01");
     const targetEnd   = new Date("2022-12-01");
     const duration    = 1800;
@@ -139,10 +180,10 @@ export default function App() {
       const e = easeInOutCubic(t);
       setWindowStart(new Date(fromStart + e * (targetStart.getTime() - fromStart)));
       setWindowEnd  (new Date(fromEnd   + e * (targetEnd.getTime()   - fromEnd)));
-      if (t < 1) requestAnimationFrame(frame);
+      introFrame.current = t < 1 ? requestAnimationFrame(frame) : null;
     }
 
-    requestAnimationFrame(frame);
+    introFrame.current = requestAnimationFrame(frame);
   }, []);
 
   // Intro zoom: once events load, animate from full extent → 1-year target window
@@ -156,13 +197,41 @@ export default function App() {
   const effectiveWindowStart = windowStart ?? fullStart;
   const effectiveWindowEnd = windowEnd ?? fullEnd;
 
+  const preSearchWindow = useRef<{ start: Date | null; end: Date | null } | null>(null);
+  const currentWindow = useRef({ start: windowStart, end: windowEnd });
+  currentWindow.current = { start: windowStart, end: windowEnd };
+  useEffect(() => {
+    setSelectedEventId(null);
+    setGroupedEventIds(null);
+    setReturnGroupIds(null);
+    if (!isSearching) {
+      if (preSearchWindow.current) {
+        setWindowStart(preSearchWindow.current.start);
+        setWindowEnd(preSearchWindow.current.end);
+        preSearchWindow.current = null;
+      }
+      return;
+    }
+    if (introFrame.current !== null) { cancelAnimationFrame(introFrame.current); introFrame.current = null; }
+    preSearchWindow.current ??= currentWindow.current;
+    const dates = searchEvents.flatMap(event => [visualStartDate(event), visualEndDate(event)])
+      .filter((date): date is string => Boolean(date))
+      .map(date => parseDate(date).getTime()).filter(Number.isFinite);
+    if (dates.length) {
+      const start = Math.min(...dates), end = Math.max(...dates);
+      const padding = Math.max((end - start) * 0.06, 14 * 86_400_000);
+      setWindowStart(new Date(start - padding));
+      setWindowEnd(new Date(end + padding));
+    }
+  }, [isSearching, searchEvents]);
+
   // Keep ref in sync so the width-change handler always reads the latest window
   effectiveWindowRef.current = { start: effectiveWindowStart, end: effectiveWindowEnd };
 
   function handleTimelineWidthChange(newWidth: number) {
     const prev = prevTimelineWidthRef.current;
     prevTimelineWidthRef.current = newWidth;
-    if (prev === 0 || newWidth === 0 || prev === newWidth) return;
+    if (isSearching || prev < 160 || newWidth < 160 || prev === newWidth) return;
     const win = effectiveWindowRef.current;
     if (!win) return;
     const ratio = newWidth / prev;
@@ -172,41 +241,52 @@ export default function App() {
     setWindowEnd(new Date(center + halfDuration));
   }
 
-  // Auto visibility level: fewer levels shown when window is wide (zoomed out)
+  // Auto visibility percentage changes continuously as the date window changes.
   const windowDays = (effectiveWindowEnd.getTime() - effectiveWindowStart.getTime()) / 86_400_000;
-  // Bonus levels when fewer jurisdictions are active (log2: 8→+0, 4→+1, 2→+2, 1→+3)
+  // Show a little more detail when fewer jurisdictions are active.
   const regionBonus = Math.floor(Math.log2(8 / Math.max(activeRegions.size, 1)));
-  const autoVisibilityLevel = Math.min(
-    (windowDays > 1095 ? 1 :
-     windowDays > 730  ? 2 :
-     windowDays > 365  ? 3 :
-     windowDays > 180  ? 4 :
-     windowDays > 90   ? 5 : 6) + regionBonus,
-    6
-  );
+  const autoVisibilityPercent = Math.min(continuousVisibilityPercent(windowDays) + regionBonus * 10, 100);
 
   const effectiveUnstackBars = unstackBars || (autoUnstackEnabled && windowDays < 180);
 
-  const effectiveVisibilityLevel = manualVisibilityLevel ?? autoVisibilityLevel;
+  const effectiveVisibilityPercent = manualVisibilityPercent ?? autoVisibilityPercent;
 
   // Group filteredEvents by their deduplication key (same key used in Timeline).
-  // If any member of a group is visible at the current level, include ALL members
-  // so the stacked badge count stays stable as you zoom in.
+  // Source visibility levels still define priority, while the percentage slider
+  // selects a gradual share of records. Stacked records remain together.
   const visibleEvents = useMemo(() => {
+    if (isSearching) return searchEvents;
     const groups = new Map<string, typeof filteredEvents>();
     for (const e of filteredEvents) {
       const k = timelineGroupKey(e);
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k)!.push(e);
     }
-    const result: typeof filteredEvents = [];
-    for (const group of groups.values()) {
-      if (group.some(e => e.visibility_level <= effectiveVisibilityLevel)) {
-        result.push(...group);
-      }
+    const groupRows = [...groups.entries()].map(([key, group]) => ({
+      key,
+      group,
+      priority: Math.min(...group.map(event => event.visibility_level)),
+      longestSpan: Math.max(...group.map(event => {
+        const start = parseDate(visualStartDate(event)).getTime();
+        const endValue = visualEndDate(event);
+        const end = endValue ? parseDate(endValue).getTime() : start;
+        return Number.isFinite(start) && Number.isFinite(end) ? Math.max(end - start, 0) : 0;
+      })),
+    })).sort((a, b) =>
+      a.priority - b.priority || b.longestSpan - a.longestSpan || a.key.localeCompare(b.key));
+
+    const targetCount = Math.max(1, Math.round(
+      filteredEvents.length * Math.max(10, Math.min(100, effectiveVisibilityPercent)) / 100,
+    ));
+    const selectedKeys = new Set<string>();
+    let selectedCount = 0;
+    for (const row of groupRows) {
+      if (selectedCount >= targetCount) break;
+      selectedKeys.add(row.key);
+      selectedCount += row.group.length;
     }
-    return result;
-  }, [filteredEvents, effectiveVisibilityLevel]);
+    return filteredEvents.filter(event => selectedKeys.has(timelineGroupKey(event)));
+  }, [filteredEvents, effectiveVisibilityPercent, isSearching, searchEvents]);
 
   if (loading) {
     return (
@@ -244,9 +324,10 @@ export default function App() {
           </button>
         </div>
         <span className="text-xs text-gray-400">
-          Showing <span className="font-semibold text-gray-600">{visibleEvents.length}</span> of{" "}
-          <span className="font-semibold text-gray-600">{events.length}</span> dated mandates ·{" "}
-          <span className="font-semibold text-gray-600">{totalRecords}</span> records total
+          {isSearching ? <><span className="font-semibold text-gray-600">{searchResults.length}</span> matching records</> : <>
+            Showing <span className="font-semibold text-gray-600">{visibleEvents.length}</span> of{" "}
+            <span className="font-semibold text-gray-600">{events.length}</span> dated mandates
+          </>} · <span className="font-semibold text-gray-600">{totalRecords}</span> records total
         </span>
       </header>
 
@@ -271,19 +352,20 @@ export default function App() {
                 onClearAllRegions={clearAllRegions}
                 onSelectAllTypes={selectAllTypes}
                 onClearAllTypes={clearAllTypes}
-                activeCategories={activeCategories}
-                onToggleCategory={toggleCategory}
-                onSelectAllCategories={selectAllCategories}
-                onClearAllCategories={clearAllCategories}
-                onEnterCategoryMode={enterCategoryMode}
+                nameQuery={nameQuery}
+                targetQuery={targetQuery}
+                onNameQueryChange={setNameQuery}
+                onTargetQueryChange={setTargetQuery}
+                searchResults={searchResults}
+                isSearching={isSearching}
                 windowStart={effectiveWindowStart}
                 windowEnd={effectiveWindowEnd}
                 fullStart={fullStart}
                 fullEnd={fullEnd}
                 onWindowChange={(start, end) => { setWindowStart(start); setWindowEnd(end); }}
-                autoVisibilityLevel={autoVisibilityLevel}
-                manualVisibilityLevel={manualVisibilityLevel}
-                onVisibilityLevelChange={setManualVisibilityLevel}
+                autoVisibilityPercent={autoVisibilityPercent}
+                manualVisibilityPercent={manualVisibilityPercent}
+                onVisibilityPercentChange={setManualVisibilityPercent}
                 showOngoingTail={showOngoingTail}
                 ongoingCount={events.filter(hasOngoingSegment).length}
                 onToggleOngoingTail={() => setShowOngoingTail(v => !v)}
@@ -342,12 +424,15 @@ export default function App() {
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           <Timeline
             events={visibleEvents}
-            activeRegions={activeRegions}
+            activeRegions={timelineRegions}
             onEventClick={handleEventClick}
             onEventDoubleClick={handleEventDoubleClick}
             onGroupClick={handleGroupClick}
             windowStart={effectiveWindowStart}
             windowEnd={effectiveWindowEnd}
+            fullStart={fullStart}
+            fullEnd={fullEnd}
+            onWindowChange={(start, end) => { setWindowStart(start); setWindowEnd(end); }}
             onWidthChange={handleTimelineWidthChange}
             selectedEventId={selectedEventId}
             unstackBars={effectiveUnstackBars}
@@ -357,7 +442,7 @@ export default function App() {
             showNotableLabels={showNotableLabels}
           />
           <Minimap
-            events={events}
+            events={isSearching ? searchEvents : events}
             fullStart={fullStart}
             fullEnd={fullEnd}
             windowStart={effectiveWindowStart}
@@ -378,10 +463,14 @@ export default function App() {
               <EventDetail
                 eventId={selectedEventId}
                 groupIds={groupedEventIds}
-                events={events}
+                events={isSearching ? searchEvents : events}
                 fetchDetail={fetchDetail}
-                onClose={() => { setSelectedEventId(null); setGroupedEventIds(null); }}
+                onClose={() => { setSelectedEventId(null); setGroupedEventIds(null); setReturnGroupIds(null); }}
                 onSelectFromGroup={handleSelectFromGroup}
+                onBackToGroup={returnGroupIds ? handleBackToGroup : undefined}
+                dateNotice={{
+                  hiddenRecords: dateIssueRecords,
+                }}
               />
             </div>
           </motion.aside>
@@ -400,7 +489,7 @@ export default function App() {
       {!showDetail && (
         <GroupPanel
           ids={groupedEventIds}
-          events={events}
+          events={isSearching ? searchEvents : events}
           onSelectEvent={handleSelectFromGroup}
           onClose={() => setGroupedEventIds(null)}
         />
@@ -433,7 +522,7 @@ export default function App() {
             <div className="mt-4">
               <h3 className="text-sm font-bold text-gray-800 mb-1.5">How to use</h3>
               <p className="text-sm text-gray-600 leading-relaxed">
-                Use the minimap at the bottom to pan and zoom the timeline window. Click any mandate bar to open its detail panel on the right. Use the +/− buttons in the filter bar to control how many events are shown at once. The filter bar also lets you narrow by jurisdiction, mandate type, and category. Double-click a bar to isolate that jurisdiction, and use the search in the Experimental section to find specific mandates by name.
+                Scroll up over the timeline to zoom in and scroll down to zoom out; when a mandate is selected, zooming stays centred on it. Hold the middle mouse button and drag left or right to pan the timeline directly, or use the minimap at the bottom. Click any mandate bar to open its detail panel on the right. The filter bar lets you narrow by jurisdiction and mandate type. Double-click a bar to isolate that jurisdiction. Search by Name or Target to find matching policies across the full dataset, including boosters. Both search fields support partial words and small spelling errors; when both are filled, a record must match both. Clear both fields to restore your previous view.
               </p>
             </div>
 

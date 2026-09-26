@@ -1,3 +1,5 @@
+import type { Mandate } from "../data/dataset";
+
 export type Region = "WA" | "NT" | "QLD" | "NSW" | "VIC" | "TAS" | "SA" | "ACT";
 
 export type EventType = string;
@@ -10,7 +12,7 @@ export interface BoosterOverlay {
   ongoing: boolean;
 }
 
-/** Slim record derived from the bundled CSV — used for timeline rendering */
+/** Timeline fields plus source records for complete policy details. */
 export interface EventIndex {
   id: string;
   title: string;
@@ -20,6 +22,8 @@ export interface EventIndex {
   announcement_date: string | null;
   enforcement_date: string | null;
   booster: BoosterOverlay | null;
+  record?: Mandate;
+  boosterRecord?: Mandate;
   region: Region;
   type: EventType;
   short_description: string | null;

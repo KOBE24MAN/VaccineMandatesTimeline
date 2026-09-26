@@ -1,12 +1,8 @@
-# MandEval - standalone frontend
+# MandEval — standalone frontend
 
-The frontend runs without the backend and reads the mandate data from
-`vaccine_mandates.csv` in this folder. Policy-name search supports small spelling
-mistakes and reordered words when the original keyword search finds no results.
-
-This folder contains the entire frontend and its data. It can be copied or opened
-in VS Code on its own. No files outside this folder, Python server, SQLite database
-or API connection are required. The Zijun interface and interactions are preserved.
+This folder contains the frontend. Its authoritative mandate data is
+**`../vaccine_mandates.csv`**, at the repository root. Keep both when copying the
+project. No Python server, database or API connection is required.
 
 ## Start
 
@@ -17,54 +13,71 @@ npm ci
 npm run dev -- --host 127.0.0.1 --port 5174
 ```
 
-Dependencies are already installed on this computer; `npm ci` is only necessary on
-a fresh copy or after dependency changes. Open the Local URL shown in the terminal.
-If that port is busy Vite will select another available port.
-
-On Windows, double-click `Start-Local-Demo.bat`. Double-click `Stop-Local-Demo.bat`, close its terminal or press Ctrl+C
-to stop the frontend.
+Open the local URL shown in the terminal. If the requested port is busy, Vite
+selects another available port. On Windows, the repository root contains
+`Start-Local-Demo.bat` and `Stop-Local-Demo.bat`; run them from there. The stop
+launcher targets this checkout's Vite processes, regardless of the local port.
+Ctrl+C in the startup terminal also stops the app.
 
 ## Files
 
 ```text
-frontend-client/
-  src/App.tsx                 Main page
-  src/components/             Timeline, filters, details and minimap
-  src/data/store.ts           Local data loading and lookup
-  src/data/dataset.ts         CSV parsing and search
-  src/index.css               Styles
-  vaccine_mandates.csv         Tab-delimited mandate data
-  data/notable_events.csv      5 notable events
-  tests/                      Data and search regression tests
-  package.json                Dependencies and commands
-  Start-Local-Demo.bat         Windows launcher
-  Stop-Local-Demo.bat          Stop only this frontend (any local port)
-  dist/                       Generated static website
+repository/
+  vaccine_mandates.csv          Authoritative tab-delimited mandate data
+  Start-Local-Demo.bat          Windows launcher
+  Stop-Local-Demo.bat           Windows stop launcher
+  frontend-client/
+    src/App.tsx                Main page
+    src/components/            Timeline, filters, details and minimap
+    src/data/store.ts          Runtime data loading and lookup
+    src/data/dataset.ts        Data parsing and search
+    src/index.css              Styles
+    data/notable_events.csv    Notable events bundled with the frontend
+    scripts/stop-local-demo.ps1  Checkout-scoped Windows process stop helper
+    tests/                     Data and search regression tests
+    vite.config.ts             Root CSV serving and build-copy configuration
+    package.json              Dependencies and commands
+    dist/                     Generated static website
 ```
 
-Edit `vaccine_mandates.csv` to change the frontend data. Keep the same header row
-and tab delimiter. To attach a booster segment to an original mandate, set the
-original row's `booster_id` to the booster row's `id`; the booster row will be
-used as an overlay instead of a separate timeline bar. Rebuild before deploying
-updated data.
+## Data and search
+
+Edit the root `vaccine_mandates.csv` to change mandate data. Keep the header names,
+unique IDs and tab delimiter. The frontend fetches the file once per page load;
+search and policy details share the loaded records. Development changes to the
+root file reload the page automatically. A failed load displays an error instead
+of silently substituting data.
+
+To link a booster to an original mandate, set the original's `booster_id` to the
+booster row's `id`. Its timeline segment overlays the original row. Hover cards
+keep concise phase/date summaries, with a linked booster summary
+below the original. The information panel keeps the original field order and
+compact layout, with the complete booster record below the original. Both use
+`(ID:123) Policy Name` headings.
+
+Name and policy-target fuzzy searches update the displayed results as you type.
+Each query matches its own field; when both are filled, a record must match both.
+Search covers all records, including boosters, regardless of the normal region,
+type and visibility filters. The results list includes every matching record.
+On the timeline, a matching booster overlays its original when that original
+also matches; otherwise it appears as its own search-result row from enforcement
+to removal. Each Clear button clears only the adjacent field. Once both fields
+are empty, the previous region, type, visibility and date-window settings return.
+The category filter and separate experimental search are removed.
 
 Optional `visibility_level` values (integers 1–6) override automatic levels.
-If omitted, the original backend duration rules apply: >=365 days → 1,
->=270 → 2, >=180 → 3, >=90 → 4, >=30 → 5, shorter/unknown → 6.
+If omitted, duration thresholds are used: >=365 days → 1, >=270 → 2,
+>=180 → 3, >=90 → 4, >=30 → 5, shorter/unknown → 6.
 Missing `duration_days` values are calculated from effective/enforcement to removal.
 These levels control display density, not policy importance.
 
 Optional `ongoing` accepts true/false or 1/0. If omitted, a missing removal date
 means ongoing; a supplied removal date means ended. The tail toggle adds a fade
-and arrow without changing the recorded dates. It is disabled with an explanation
-when the dataset has no ongoing mandates. Booster rows follow the same rule and
-can extend beyond the original mandate's removal date.
+and arrow without changing the recorded dates. It is disabled when the dataset
+has no ongoing mandates. Booster rows follow the same rule and can extend beyond
+the original mandate's removal date.
 
-Date markers distinguish announcement/effective (hollow circle), enforcement
-(filled circle), booster start (diamond), and removal/booster end (double circle).
-Dates that coincide share a marker; records with different phases are not merged.
-
-## Check and build
+## Validate and build
 
 ```sh
 npm test
@@ -73,9 +86,9 @@ npm run build
 npm run preview
 ```
 
-Publish the contents of `dist/` to a static web host. All data is included; relative
-asset paths also support a subdirectory. Preview through an HTTP server instead of
-double-clicking the generated HTML.
-
-Tests check the new tab-delimited dataset, booster links, newline parsing, notable
-events and search. Update expected counts when intentionally changing the dataset.
+Publish the contents of `dist/` to a static web host. The build copies the current
+root CSV into `dist/vaccine_mandates.csv`; the browser fetches this separate asset
+at runtime. Publish that CSV along with the other build files. For data-only
+updates, replace the deployed CSV and reload the page, or rebuild from the updated
+root CSV and redeploy. Relative asset paths support deployment in a subdirectory.
+Use an HTTP server rather than opening the generated HTML directly.

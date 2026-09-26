@@ -1,7 +1,9 @@
-import { useRef, useEffect, useLayoutEffect, useState, useMemo } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useMemo, useCallback } from "react";
 import * as d3 from "d3";
 import type { EventIndex, Region, NotableEvent } from "../types/event";
 import { ALL_REGIONS } from "../types/event";
+import { MandateTooltip } from "./MandateTooltip";
+import { mandateHeading } from "../utils/mandateDetails";
 import { parseDate, yearsBetween } from "../utils/dates";
 import { visualStartDate, visualEndDate, hasOngoingSegment, timelineGroupKey } from "../utils/timeline";
 
@@ -85,59 +87,7 @@ function assignLanes(events: EventIndex[]): Map<string, number> {
   return result;
 }
 
-interface TooltipState { x: number; y: number; event: EventIndex }
-
-function TooltipPeriods({ event }: { event: EventIndex }) {
-  const effective = event.effective_date === undefined ? event.start_date : event.effective_date;
-  const firstStageEnd = effective ?? event.enforcement_date;
-  const end = event.ongoing ? "Ongoing" : event.end_date ?? "End date not recorded";
-  const periods = [
-    ...(event.announcement_date && firstStageEnd && event.announcement_date < firstStageEnd ? [{
-      label: effective ? "Announced → effective" : "Announced → enforcement",
-      dates: `${event.announcement_date} → ${firstStageEnd}`,
-      meaning: effective ? "Announced, not yet effective · pale dashed segment" : "Effective date not recorded · pale dashed segment",
-      kind: "announcement",
-    }] : []),
-    ...(effective && event.enforcement_date && effective < event.enforcement_date ? [{
-      label: "Effective → enforcement",
-      dates: `${effective} → ${event.enforcement_date}`,
-      meaning: "Effective, pending enforcement · light stripes",
-      kind: "pending",
-    }] : []),
-    {
-      label: event.enforcement_date ? "Enforcement → removal" : "Mandate period",
-      dates: `${event.enforcement_date ?? event.start_date} → ${end}`,
-      meaning: event.enforcement_date ? "Active mandate · original solid colour" : "Enforcement date not recorded · solid colour",
-      kind: "active",
-    },
-    ...(event.booster ? [{
-      label: "Booster enforcement → booster removal",
-      dates: `${event.booster.start_date} → ${event.booster.ongoing ? "Ongoing" : event.booster.end_date ?? "End date not recorded"}`,
-      meaning: "Booster requirement · dark striped overlay",
-      kind: "booster",
-    }] : []),
-  ];
-  const color = REGION_COLOR[event.region];
-  return <div className="mt-2 space-y-2 border-t border-gray-200 pt-2">
-    {periods.map(period => <div key={period.kind} className="flex gap-2 leading-snug">
-      <span className="mt-1 h-2.5 w-3.5 flex-shrink-0 rounded-sm" style={{
-        background: period.kind === "announcement" ? `${color}20`
-          : period.kind === "pending" ? `repeating-linear-gradient(45deg, white 0 3px, ${color} 3px 5px)`
-          : period.kind === "booster" ? `repeating-linear-gradient(-45deg, ${d3.color(color)!.darker(1.25)} 0 3px, white 3px 4px)`
-          : eventColor(event.region, event.type),
-        border: period.kind === "announcement" ? `1px dashed ${color}` : undefined,
-      }} />
-      <div>
-        <p className="font-semibold text-gray-700">{period.label}</p>
-        <p className="text-gray-800 tabular-nums">{period.dates}</p>
-        <p className="text-[11px] text-gray-500">{period.meaning}</p>
-      </div>
-    </div>)}
-    {effective && effective === event.enforcement_date && <p className="text-[11px] text-gray-500">Effective and enforced on the same day ({effective}); no pending period.</p>}
-    {event.announcement_date && (!firstStageEnd || event.announcement_date >= firstStageEnd) && <p className="text-[11px] text-gray-500">Announced: {event.announcement_date}{event.announcement_date === firstStageEnd ? " (same day as effective / enforcement)" : ""}.</p>}
-    {!effective && <p className="text-[11px] text-gray-500">Effective date not recorded.</p>}
-  </div>;
-}
+interface TooltipState { x: number; y: number; event: DeduplicatedEvent }
 
 interface Props {
   events: EventIndex[];
@@ -147,6 +97,9 @@ interface Props {
   onGroupClick: (ids: string[]) => void;
   windowStart: Date;
   windowEnd: Date;
+  fullStart: Date;
+  fullEnd: Date;
+  onWindowChange: (start: Date, end: Date) => void;
   onWidthChange?: (width: number) => void;
   showOngoingTail?: boolean;
   notableEvents?: NotableEvent[];
@@ -156,12 +109,28 @@ interface Props {
   unstackBars?: boolean;
 }
 
-export function Timeline({ events, activeRegions, onEventClick, onEventDoubleClick, onGroupClick, windowStart, windowEnd, onWidthChange, showOngoingTail = true, notableEvents = [], showNotableLabels = true, tooltipTransparent = false, selectedEventId = null, unstackBars = false }: Props) {
+export function Timeline({ events, activeRegions, onEventClick, onEventDoubleClick, onGroupClick, windowStart, windowEnd, fullStart, fullEnd, onWindowChange, onWidthChange, showOngoingTail = true, notableEvents = [], showNotableLabels = true, tooltipTransparent = false, selectedEventId = null, unstackBars = false }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef       = useRef<SVGSVGElement>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [dims, setDims] = useState({ width: 800, height: 500 });
+  const [isMiddlePanning, setIsMiddlePanning] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const closeTooltip = useCallback(() => setTooltip(null), []);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeTooltip();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [closeTooltip]);
+  useEffect(() => { closeTooltip(); }, [events, windowStart, windowEnd, closeTooltip]);
+  const tooltipEvents = tooltip?.event.mergedIds
+    ? tooltip.event.mergedIds.flatMap(id => {
+      const event = events.find(item => item.id === id);
+      return event ? [event] : [];
+    })
+    : tooltip ? [tooltip.event] : [];
   useLayoutEffect(() => {
     if (!tooltip || !tooltipRef.current) return;
     const el = tooltipRef.current;
@@ -183,6 +152,32 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
   const onWidthChangeRef = useRef(onWidthChange);
   useEffect(() => { onWidthChangeRef.current = onWidthChange; }, [onWidthChange]);
 
+  const onWindowChangeRef = useRef(onWindowChange);
+  onWindowChangeRef.current = onWindowChange;
+  const wheelWindowRef = useRef({ windowStart, windowEnd, fullStart, fullEnd });
+  wheelWindowRef.current = { windowStart, windowEnd, fullStart, fullEnd };
+  const middlePanRef = useRef<{
+    originX: number;
+    start: number;
+    end: number;
+    fullStart: number;
+    fullEnd: number;
+  } | null>(null);
+  const selectedZoomCenterRef = useRef<number | null>(null);
+  const selectedZoomEvent = selectedEventId
+    ? events.find(event => String(event.id) === String(selectedEventId))
+    : undefined;
+  if (selectedZoomEvent) {
+    const selectedStart = parseDate(visualStartDate(selectedZoomEvent)).getTime();
+    const selectedEndValue = visualEndDate(selectedZoomEvent);
+    const selectedEnd = selectedEndValue ? parseDate(selectedEndValue).getTime() : selectedStart;
+    selectedZoomCenterRef.current = Number.isFinite(selectedStart) && Number.isFinite(selectedEnd)
+      ? selectedStart + (selectedEnd - selectedStart) / 2
+      : null;
+  } else {
+    selectedZoomCenterRef.current = null;
+  }
+
   // Track previous filter/data state to detect window-only changes (panning),
   // which should not trigger the enter animation.
   const prevEventIdsRef = useRef<Set<string>>(new Set());
@@ -200,6 +195,157 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
     obs.observe(el);
     return () => obs.disconnect();
   }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY === 0) return;
+      event.preventDefault();
+      closeTooltip();
+
+      const rect = el.getBoundingClientRect();
+      const plotLeft = Math.min(MARGIN.left, rect.width);
+      const plotRight = Math.max(plotLeft + 1, rect.width - MARGIN.right);
+      const state = wheelWindowRef.current;
+      const start = state.windowStart.getTime();
+      const end = state.windowEnd.getTime();
+      const fullStartMs = state.fullStart.getTime();
+      const fullEndMs = state.fullEnd.getTime();
+      const fullSpan = Math.max(fullEndMs - fullStartMs, 1);
+      const currentSpan = Math.max(end - start, 1);
+      const minimumSpan = Math.min(7 * 24 * 60 * 60 * 1000, fullSpan);
+
+      const pixelDelta = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? event.deltaY * 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? event.deltaY * Math.max(rect.height, 1)
+          : event.deltaY;
+      const limitedDelta = Math.max(-160, Math.min(160, pixelDelta));
+      const zoomFactor = Math.exp(limitedDelta * 0.0015);
+      const nextSpan = Math.max(minimumSpan, Math.min(fullSpan, currentSpan * zoomFactor));
+      const selectedCenter = selectedZoomCenterRef.current;
+      const pointerX = Math.max(plotLeft, Math.min(event.clientX - rect.left, plotRight));
+      const pointerRatio = (pointerX - plotLeft) / (plotRight - plotLeft);
+      const anchorRatio = selectedCenter === null ? pointerRatio : 0.5;
+      const anchorTime = selectedCenter === null
+        ? start + currentSpan * pointerRatio
+        : selectedCenter;
+
+      let nextStart = anchorTime - nextSpan * anchorRatio;
+      let nextEnd = nextStart + nextSpan;
+      if (nextStart < fullStartMs) {
+        nextStart = fullStartMs;
+        nextEnd = fullStartMs + nextSpan;
+      }
+      if (nextEnd > fullEndMs) {
+        nextEnd = fullEndMs;
+        nextStart = fullEndMs - nextSpan;
+      }
+
+      if (Math.abs(nextStart - start) < 1 && Math.abs(nextEnd - end) < 1) return;
+      const nextWindow = {
+        windowStart: new Date(nextStart),
+        windowEnd: new Date(nextEnd),
+        fullStart: state.fullStart,
+        fullEnd: state.fullEnd,
+      };
+      wheelWindowRef.current = nextWindow;
+      onWindowChangeRef.current(nextWindow.windowStart, nextWindow.windowEnd);
+    };
+
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [closeTooltip]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const finishPan = () => {
+      if (!middlePanRef.current) return;
+      middlePanRef.current = null;
+      setIsMiddlePanning(false);
+    };
+
+    const handleMouseDown = (event: MouseEvent) => {
+      if (event.button !== 1) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeTooltip();
+
+      const state = wheelWindowRef.current;
+      middlePanRef.current = {
+        originX: event.clientX,
+        start: state.windowStart.getTime(),
+        end: state.windowEnd.getTime(),
+        fullStart: state.fullStart.getTime(),
+        fullEnd: state.fullEnd.getTime(),
+      };
+      setIsMiddlePanning(true);
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const pan = middlePanRef.current;
+      if (!pan) return;
+      if ((event.buttons & 4) === 0) {
+        finishPan();
+        return;
+      }
+      event.preventDefault();
+
+      const rect = el.getBoundingClientRect();
+      const plotWidth = Math.max(rect.width - MARGIN.left - MARGIN.right, 1);
+      const span = pan.end - pan.start;
+      const fullSpan = pan.fullEnd - pan.fullStart;
+      if (span >= fullSpan) return;
+
+      const timeShift = -((event.clientX - pan.originX) / plotWidth) * span;
+      let nextStart = pan.start + timeShift;
+      let nextEnd = pan.end + timeShift;
+      if (nextStart < pan.fullStart) {
+        nextStart = pan.fullStart;
+        nextEnd = pan.fullStart + span;
+      }
+      if (nextEnd > pan.fullEnd) {
+        nextEnd = pan.fullEnd;
+        nextStart = pan.fullEnd - span;
+      }
+
+      const current = wheelWindowRef.current;
+      if (Math.abs(nextStart - current.windowStart.getTime()) < 1 &&
+          Math.abs(nextEnd - current.windowEnd.getTime()) < 1) return;
+      const nextWindow = {
+        windowStart: new Date(nextStart),
+        windowEnd: new Date(nextEnd),
+        fullStart: current.fullStart,
+        fullEnd: current.fullEnd,
+      };
+      wheelWindowRef.current = nextWindow;
+      onWindowChangeRef.current(nextWindow.windowStart, nextWindow.windowEnd);
+    };
+
+    const handleMouseUp = (event: MouseEvent) => {
+      if (event.button === 1) finishPan();
+    };
+    const preventMiddleClick = (event: MouseEvent) => {
+      if (event.button === 1) event.preventDefault();
+    };
+
+    el.addEventListener("mousedown", handleMouseDown);
+    el.addEventListener("auxclick", preventMiddleClick);
+    window.addEventListener("mousemove", handleMouseMove, { passive: false });
+    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("blur", finishPan);
+    return () => {
+      el.removeEventListener("mousedown", handleMouseDown);
+      el.removeEventListener("auxclick", preventMiddleClick);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("blur", finishPan);
+    };
+  }, [closeTooltip]);
 
   const windowYears = yearsBetween(windowStart, windowEnd);
   const isDetail    = windowYears < 0.5;
@@ -392,7 +538,11 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
           const outlineColor = REGION_COLOR[region];
           const isSelected = selectedEventId !== null && (
             ev.id === selectedEventId ||
-            (ev.mergedIds?.includes(selectedEventId) ?? false)
+            (ev.mergedIds?.includes(selectedEventId) ?? false) ||
+            (ev.mergedIds ?? [ev.id]).some(id => {
+              const original = events.find(event => event.id === id);
+              return original?.booster?.id === selectedEventId || original?.boosterRecord?.id === selectedEventId;
+            })
           );
 
           const isNew = prevEventIdsRef.current.size > 0
@@ -597,6 +747,9 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
           // ── Hit rect ───────────────────────────────────────────────────────
           barLayer.append("rect")
             .attr("data-event-id", ev.id)
+            .attr("data-selected", isSelected ? "true" : "false")
+            .attr("role", "button").attr("tabindex", 0)
+            .attr("aria-label", mandateHeading(ev.id, ev.title) + (ev.mergedIds ? ` (${ev.mergedIds.length} grouped mandates)` : ""))
             .attr("x", visualX1).attr("y", barY)
             .attr("width", Math.max((ev.ongoing ? MARGIN.left + innerW : visualX2raw) - visualX1, 3)).attr("height", barH)
             .attr("rx", rx).attr("fill", "transparent").attr("cursor", "pointer")
@@ -608,14 +761,27 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
             })
             .on("mousemove", (e: MouseEvent) => {
               const r = svgEl.getBoundingClientRect();
-              setTooltip(t => t ? { ...t, x: e.clientX - r.left, y: e.clientY - r.top } : null);
+              setTooltip({ x: e.clientX - r.left, y: e.clientY - r.top, event: ev });
             })
             .on("mouseleave", () => {
               g.attr("opacity", 1);
               outline.attr("stroke-width", 1).attr("stroke-opacity", 0.5);
-              setTooltip(null);
+              closeTooltip();
+            })
+            .on("focus", () => {
+              setTooltip({ x: Math.max(MARGIN.left, visualX1), y: barY + barH / 2, event: ev });
+            })
+            .on("blur", closeTooltip)
+            .on("keydown", (e: KeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                closeTooltip();
+                if (ev.mergedIds && ev.mergedIds.length > 1) onGroupClickRef.current(ev.mergedIds);
+                else onClickRef.current(ev.id);
+              }
             })
             .on("click", () => {
+              closeTooltip();
               if (ev.mergedIds && ev.mergedIds.length > 1) {
                 onGroupClickRef.current(ev.mergedIds);
               } else {
@@ -853,37 +1019,36 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
       .attr("fill", "none").attr("stroke", "#9CA3AF").attr("stroke-width", 0.5);
 
     prevEventIdsRef.current = currentEventIds;
-  }, [layout, windowStart, windowEnd, dims, isDetail, notableEvents, showNotableLabels, showOngoingTail, selectedEventId]);
+  }, [layout, events, windowStart, windowEnd, dims, isDetail, notableEvents, showNotableLabels, showOngoingTail, selectedEventId, closeTooltip]);
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-hidden relative bg-white">
+    <div
+      ref={containerRef}
+      className={`flex-1 overflow-hidden relative bg-white ${isMiddlePanning ? "cursor-grabbing" : ""}`}
+      title={selectedEventId
+        ? "Scroll to zoom around the selected mandate; middle-drag to pan"
+        : "Scroll to zoom; middle-drag to pan"}
+    >
       <svg ref={svgRef} style={{ width: dims.width, height: dims.height }} />
 
       {tooltip && (
         <div
           ref={tooltipRef}
           role="tooltip"
+          aria-label="Mandate summary"
           className={`absolute z-10 pointer-events-none border rounded-lg p-3 text-xs max-w-xs transition-colors ${
             tooltipTransparent
               ? "bg-white/50 backdrop-blur-sm border-gray-200/60 shadow-sm"
               : "bg-white border-gray-200 shadow-lg"
           }`}
           style={{
-            width: Math.min(320, dims.width - 16),
+            width: Math.max(0, Math.min(320, dims.width - 16)),
             left: tooltip.x + 14,
-            top:  tooltip.y - 8,
+            top: tooltip.y - 8,
           }}
         >
-          <p className={`font-semibold mb-1 ${tooltipTransparent ? "text-gray-900" : "text-gray-800"}`}>{tooltip.event.title}</p>
-          <p className={tooltipTransparent ? "text-gray-600" : "text-gray-500"}>{tooltip.event.region} · {tooltip.event.type}</p>
-          <TooltipPeriods event={tooltip.event} />
-          {tooltip.event.short_description && (
-            <ul className="mt-1 space-y-0.5 list-none">
-              {tooltip.event.short_description.split("\n").map((line, i) => (
-                <li key={i} className={`leading-snug ${tooltipTransparent ? "text-gray-600" : "text-gray-600"}`}>· {line}</li>
-              ))}
-            </ul>
-          )}
+          <MandateTooltip events={tooltipEvents} color={REGION_COLOR[tooltip.event.region] ?? "#5a84ff"}
+            transparent={tooltipTransparent} />
         </div>
       )}
     </div>
