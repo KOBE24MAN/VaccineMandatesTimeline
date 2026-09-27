@@ -57,12 +57,14 @@ compact layout, with the complete booster record below the original. Both use
 
 Name and policy-target fuzzy searches update the displayed results as you type.
 Each query matches its own field; when both are filled, a record must match both.
-Search covers all records, including boosters, regardless of the normal region,
-type and visibility filters. The results list includes every matching record.
+Search covers records in the selected jurisdictions and mandate types, including
+boosters. These filters remain adjustable while searching. Visibility limits do
+not hide matching records. The results list includes every match in this scope.
 On the timeline, a matching booster overlays its original when that original
 also matches; otherwise it appears as its own search-result row from enforcement
 to removal. Each Clear button clears only the adjacent field. Once both fields
-are empty, the previous region, type, visibility and date-window settings return.
+are empty, the previous visibility and date-window settings return while the
+current jurisdiction and type selections remain active.
 The category filter and separate experimental search are removed.
 
 Optional `visibility_level` values (integers 1–6) override automatic levels.

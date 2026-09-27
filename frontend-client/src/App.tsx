@@ -33,8 +33,9 @@ export default function App() {
   const [nameQuery, setNameQuery] = useState("");
   const [targetQuery, setTargetQuery] = useState("");
   const isSearching = Boolean(nameQuery.trim() || targetQuery.trim());
-  const searchResults = useMemo(() => filterMandates(allRecords, { name: nameQuery, target: targetQuery }),
-    [allRecords, nameQuery, targetQuery]);
+  const searchResults = useMemo(() => filterMandates(allRecords, {
+    name: nameQuery, target: targetQuery, jurisdictions: activeRegions, types: activeTypes,
+  }), [allRecords, nameQuery, targetQuery, activeRegions, activeTypes]);
   const searchEvents = useMemo(() => searchTimelineEvents(searchResults, allRecords), [searchResults, allRecords]);
   const timelineRegions = useMemo(() => isSearching
     ? new Set(searchEvents.map(event => event.region)) : activeRegions, [isSearching, searchEvents, activeRegions]);
@@ -164,16 +165,18 @@ export default function App() {
   const currentWindow = useRef({ start: windowStart, end: windowEnd });
   currentWindow.current = { start: windowStart, end: windowEnd };
   useEffect(() => {
-    setSelectedEventId(null);
-    setGroupedEventIds(null);
     if (!isSearching) {
       if (preSearchWindow.current) {
+        setSelectedEventId(null);
+        setGroupedEventIds(null);
         setWindowStart(preSearchWindow.current.start);
         setWindowEnd(preSearchWindow.current.end);
         preSearchWindow.current = null;
       }
       return;
     }
+    setSelectedEventId(null);
+    setGroupedEventIds(null);
     if (introFrame.current !== null) { cancelAnimationFrame(introFrame.current); introFrame.current = null; }
     preSearchWindow.current ??= currentWindow.current;
     const dates = searchEvents.flatMap(event => [visualStartDate(event), visualEndDate(event)])
@@ -467,7 +470,7 @@ export default function App() {
             <div className="mt-4">
               <h3 className="text-sm font-bold text-gray-800 mb-1.5">How to use</h3>
               <p className="text-sm text-gray-600 leading-relaxed">
-                Use the minimap at the bottom to pan and zoom the timeline window. Click any mandate bar to open its detail panel on the right. Use the +/− buttons in the filter bar to control how many events are shown at once. The filter bar lets you narrow by jurisdiction and mandate type. Double-click a bar to isolate that jurisdiction. Search by Name or Target to find matching policies across the full dataset, including boosters. Both search fields support partial words and small spelling errors; when both are filled, a record must match both. Clear both fields to restore your previous view.
+                Use the minimap at the bottom to pan and zoom the timeline window. Click any mandate bar to open its detail panel on the right. Use the +/− buttons in the filter bar to control how many events are shown at once. The filter bar lets you narrow by jurisdiction and mandate type. Double-click a bar to isolate that jurisdiction. Search by Name or Target to find matching policies within the selected jurisdictions and mandate types, including boosters. Both search fields support partial words and small spelling errors; when both are filled, a record must match both. You can change the filters while searching. Clear both fields to restore your previous timeline window with the current filters.
               </p>
             </div>
 

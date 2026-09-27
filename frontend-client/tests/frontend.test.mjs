@@ -148,6 +148,31 @@ test("name and target fuzzy filters stay field-specific, combine with AND, and c
   assert.equal(filterMandates(mixed, {name:"Vaccination"}).length, 2);
 });
 
+test("both fuzzy searches respect jurisdiction and type selections, including boosters", async () => {
+  const [base] = await store.loadMandates();
+  const policy = { ...base, name: "School Vaccination", target: "Airport drivers", jurisdiction: "WA", type: "Employment" };
+  const rows = [
+    { ...policy, id: "WA-EMP" },
+    { ...policy, id: "NSW-EMP", jurisdiction: "NSW" },
+    { ...policy, id: "WA-PUBLIC", type: "Public Space" },
+    { ...policy, id: "WA-TRAVEL", type: "Travel" },
+    { ...policy, id: "WA-MULTI", type: "Employment, Travel" },
+    { ...policy, id: "WA-BOOSTER", name: "(BOOSTER) School Vaccination" },
+  ];
+  const scope = { jurisdictions: new Set(["WA"]), types: new Set(["Employment"]) };
+  const ids = filters => filterMandates(rows, filters).map(row => row.id);
+  for (const query of [{ name: "school" }, { target: "drivrs" }, { name: "school", target: "drivrs" }]) {
+    assert.deepEqual(ids({ ...scope, ...query }), ["WA-EMP", "WA-MULTI", "WA-BOOSTER"]);
+  }
+  assert.deepEqual(ids({ ...scope, name: "school", target: "teachers" }), []);
+  assert.deepEqual(ids({ ...scope, name: "school", jurisdictions: new Set(["NSW"]) }), ["NSW-EMP"]);
+  assert.deepEqual(ids({ ...scope, name: "school", types: new Set(["Public Space", "Travel"]) }),
+    ["WA-PUBLIC", "WA-TRAVEL", "WA-MULTI"]);
+  assert.deepEqual(ids({ ...scope, name: "school", jurisdictions: new Set() }), []);
+  assert.deepEqual(ids({ ...scope, target: "drivers", types: new Set() }), []);
+  assert.deepEqual(ids({ ...scope, name: "", target: "" }), ["WA-EMP", "WA-MULTI", "WA-BOOSTER"]);
+});
+
 test("matching booster policies are visible and shared overlays avoid duplicate rows", async () => {
   const { searchTimelineEvents } = await server.ssrLoadModule("/src/utils/search.ts");
   const records = await store.loadMandates();

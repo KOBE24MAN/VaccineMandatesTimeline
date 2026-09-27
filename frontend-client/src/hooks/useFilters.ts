@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import type { EventIndex, Region, EventType } from "../types/event";
 import { ALL_REGIONS, ALL_EVENT_TYPES } from "../types/event";
 
-/** Normal browsing filters are preserved while a full-dataset search is active. */
+/** Jurisdiction and type selections apply to both browsing and search. */
 export function useFilters(events: EventIndex[]) {
   const [activeRegions, setActiveRegions] = useState<Set<Region>>(new Set(ALL_REGIONS));
   const [activeTypes, setActiveTypes] = useState<Set<EventType>>(new Set(ALL_EVENT_TYPES));

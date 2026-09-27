@@ -49,6 +49,8 @@ export interface SearchResult {
 export interface MandateFilters {
   name?: string;
   target?: string;
+  jurisdictions?: ReadonlySet<string>;
+  types?: ReadonlySet<string>;
 }
 
 const textFields = [
@@ -154,14 +156,16 @@ export function parseNotableEvents(csv: string): Omit<NotableEvent, "display_dat
   }).sort((a, b) => compare(a.event_date, b.event_date) || a.id - b.id);
 }
 
-/** Match each query only against its named field, including booster records. */
+/** Search the selected jurisdiction/type scope, including its booster records. */
 export function filterMandates(
   mandates: readonly Mandate[],
-  { name = "", target = "" }: MandateFilters,
+  { name = "", target = "", jurisdictions, types }: MandateFilters,
 ): Mandate[] {
   const nameQuery = name.trim();
   const targetQuery = target.trim();
   return mandates.filter(mandate =>
+    (!jurisdictions || jurisdictions.has(mandate.jurisdiction)) &&
+    (!types || (mandate.type ?? "Employment").split(",").some(type => types.has(type.trim()))) &&
     (!nameQuery || Number.isFinite(nameMatchScore(mandate.name ?? "", nameQuery))) &&
     (!targetQuery || Number.isFinite(nameMatchScore(mandate.target ?? "", targetQuery))),
   );
