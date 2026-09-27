@@ -14,7 +14,7 @@ after(async () => { globalThis.fetch = nativeFetch; await server.close(); });
 
 const store = await server.ssrLoadModule("/src/data/store.ts");
 const { parseMandates, parseNotableEvents, searchDataset, filterMandates } = await server.ssrLoadModule("/src/data/dataset.ts");
-const { mapToIndex, mapToDetail } = await server.ssrLoadModule("/src/hooks/useEvents.ts");
+const { mapToIndex, mapToDetail, mandateDateIssueReason, isMandateDisplayable } = await server.ssrLoadModule("/src/hooks/useEvents.ts");
 const { timelineGroupKey, visualEndDate, hasOngoingSegment } = await server.ssrLoadModule("/src/utils/timeline.ts");
 
 test("root tab-delimited mandate CSV loads all 186 records across three jurisdictions", async () => {
@@ -41,6 +41,20 @@ test("missing levels use original duration rules and show progressively more rec
   assert.ok(counts[5] > counts[2]);
   assert.equal(counts[5], events.length);
   assert.equal(records.find(row => row.id === "1").visibility_level, 2);
+});
+
+test("records with only a removal date stay visible as point bars", async () => {
+  const records = await store.loadMandates();
+  const byId = new Map(records.map(row => [row.id, row]));
+  const boosterIds = new Set(records.map(row => row.booster_id).filter(Boolean));
+  const timelineRecords = records.filter(row => !boosterIds.has(row.id) && isMandateDisplayable(row));
+  const record = byId.get("104");
+  assert.equal(timelineRecords.length, 168);
+  assert.match(mandateDateIssueReason(record), /Missing effective or enforcement date/);
+  assert.equal(isMandateDisplayable(record), true);
+  const event = mapToIndex(record, byId);
+  assert.equal(event.start_date, record.removal_date);
+  assert.equal(event.end_date, record.removal_date);
 });
 
 const header = "id,jurisdiction,name,type,target,effective_date,enforcement_date,removal_date,duration_days,visibility_level,ongoing";
@@ -188,7 +202,7 @@ test("matching booster policies are visible and shared overlays avoid duplicate 
   assert.deepEqual(searchTimelineEvents([], records), []);
 });
 
-test("information cards show original then full booster with IDs and preserved newlines", async () => {
+test("information cards show original then full booster with IDs and formatted refs", async () => {
   const { MandateDetails } = await server.ssrLoadModule("/src/components/MandateDetails.tsx");
   const { mandateFields } = await server.ssrLoadModule("/src/utils/mandateDetails.ts");
   const records = await store.loadMandates();
@@ -197,14 +211,14 @@ test("information cards show original then full booster with IDs and preserved n
   const booster = byId.get(original.booster_id);
   const html = renderToStaticMarkup(React.createElement(MandateDetails, {event: mapToDetail(original, byId), color:"#2563EB"}));
   assert.ok(html.indexOf('data-mandate-detail-id="2"') < html.indexOf('data-mandate-detail-id="38"'));
-  assert.ok(html.includes("(ID:2)"));
-  assert.ok(html.includes("(ID:38)"));
+  assert.ok(html.includes("Mandates ID: </span><span data-mandate-field=\"id\">2"));
+  assert.ok(html.includes("Mandates ID: </span><span data-mandate-field=\"id\">38"));
   const split = html.split('data-mandate-detail-id="38"');
   for (const [record, section] of [[original, split[0]], [booster, split[1]]]) {
     for (const field of mandateFields(record)) assert.ok(section.includes(`data-mandate-field="${field.key}"`), `${record.id} field ${field.key}`);
   }
   assert.ok(html.includes("whitespace-pre-wrap"));
-  assert.ok(html.includes("1237\n1157\n233\n1158\n4645"));
+  assert.ok(html.includes("Ref. No.: 1237, 1157, 233, 1158, 4645"));
   const noDates = new Map(byId);
   noDates.set(booster.id, {...booster, enforcement_date:null});
   assert.equal(mapToIndex(original, noDates).booster, null);
@@ -242,7 +256,9 @@ test("information sections follow the previous layout and groups keep compact su
     assert.ok(position > previous, `${field} in the original display order`);
     previous = position;
   }
-  assert.ok(!html.includes("Name/Version"));
+  for (const label of ["Mandates ID", "Name/Version", "Jurisdiction", "Type", "Policy Target", "Announcement Date", "Publish/Effective Date", "Mandate Compliance Requirements", "Exemptions and Conditions", "Authority Issuing the Mandate", "Ref. Code", "Ref. No."]) {
+    assert.ok(html.includes(label), label);
+  }
   const summary = renderToStaticMarkup(React.createElement(MandateSummary, {event,color:"#2563EB",onSelect:()=>{}}));
   assert.ok(summary.indexOf('data-mandate-summary-id="2"') < summary.indexOf('data-mandate-summary-id="38"'));
   assert.ok(summary.includes("View full details"));

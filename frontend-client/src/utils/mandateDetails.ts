@@ -34,6 +34,16 @@ export const MANDATE_FIELDS = [
   ["ref_no", "Ref. No."],
 ] as const satisfies readonly (readonly [keyof Mandate, string])[];
 
+export type MandateField = (typeof MANDATE_FIELDS)[number][0];
+
+// This is the single display-label registry for current and future CSV rows.
+// Components should read labels from here instead of defining shorter copies.
+const MANDATE_LABELS = Object.fromEntries(MANDATE_FIELDS) as Record<MandateField, string>;
+
+export function mandateLabel(field: MandateField): string {
+  return MANDATE_LABELS[field];
+}
+
 export function mandateHeading(id: string, name: string | null | undefined): string {
   return `(ID:${id}) ${name || "Unnamed mandate"}`;
 }

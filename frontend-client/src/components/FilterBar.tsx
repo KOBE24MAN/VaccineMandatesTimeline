@@ -23,9 +23,9 @@ interface Props {
   fullStart: Date;
   fullEnd: Date;
   onWindowChange: (start: Date, end: Date) => void;
-  autoVisibilityLevel: number;
-  manualVisibilityLevel: number | null;
-  onVisibilityLevelChange: (level: number | null) => void;
+  autoVisibilityPercent: number;
+  manualVisibilityPercent: number | null;
+  onVisibilityPercentChange: (percent: number | null) => void;
   showOngoingTail: boolean;
   ongoingCount: number;
   onToggleOngoingTail: () => void;
@@ -72,9 +72,9 @@ export function FilterBar({
   fullStart,
   fullEnd,
   onWindowChange,
-  autoVisibilityLevel,
-  manualVisibilityLevel,
-  onVisibilityLevelChange,
+  autoVisibilityPercent,
+  manualVisibilityPercent,
+  onVisibilityPercentChange,
   showOngoingTail,
   ongoingCount,
   onToggleOngoingTail,
@@ -128,58 +128,14 @@ export function FilterBar({
             className="w-full border border-gray-300 rounded px-2 py-1 text-sm text-gray-700"
           />
         </div>
-        <div className="flex items-center justify-between mt-2">
+        <div className="flex items-center justify-between gap-2 mt-2">
           <button
             onClick={onResetWindow}
             className="text-xs text-blue-500 hover:underline"
           >
             Reset
           </button>
-          <div className="flex items-center gap-2">
-            {(() => {
-              // Representative window sizes (days) for each visibility level 1–6
-              const LEVEL_DAYS = [1460, 912, 549, 270, 135, 60];
-              const MS = 24 * 60 * 60 * 1000;
-              const windowDays = (windowEnd.getTime() - windowStart.getTime()) / MS;
-              const currentLevel =
-                windowDays > 1095 ? 1 :
-                windowDays > 730  ? 2 :
-                windowDays > 365  ? 3 :
-                windowDays > 180  ? 4 :
-                windowDays > 90   ? 5 : 6;
-
-              function stepTo(level: number) {
-                const days = LEVEL_DAYS[level - 1];
-                const center = (windowStart.getTime() + windowEnd.getTime()) / 2;
-                const half = (days / 2) * MS;
-                onWindowChange(new Date(center - half), new Date(center + half));
-              }
-
-              function formatWindowSize(days: number): string {
-                if (days >= 365 * 1.5) return `${Math.round(days / 365)}y`;
-                if (days >= 60) return `${Math.round(days / 30)}mo`;
-                return `${Math.round(days)}d`;
-              }
-
-              return (
-                <>
-                  <button
-                    onClick={() => stepTo(Math.max(currentLevel - 1, 1))}
-                    disabled={currentLevel <= 1}
-                    className="w-7 h-7 flex items-center justify-center rounded border border-gray-300 text-gray-600 text-base hover:border-blue-400 hover:text-blue-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                    title="Zoom out (fewer events)"
-                  >−</button>
-                  <span className="text-xs text-gray-400">{formatWindowSize(windowDays)}</span>
-                  <button
-                    onClick={() => stepTo(Math.min(currentLevel + 1, 6))}
-                    disabled={currentLevel >= 6}
-                    className="w-7 h-7 flex items-center justify-center rounded border border-gray-300 text-gray-600 text-base hover:border-blue-400 hover:text-blue-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                    title="Zoom in (more events)"
-                  >+</button>
-                </>
-              );
-            })()}
-          </div>
+          <span className="text-[11px] text-gray-400 text-right">Wheel: zoom · Middle-drag: pan</span>
         </div>
       </div>
 
@@ -274,27 +230,36 @@ export function FilterBar({
         )}
       </div>
 
-      {/* Visibility level */}
+      {/* Visibility percentage */}
       <div>
-        <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Visibility level</p>
-        <select
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Visibility</p>
+          <span className="text-xs font-medium text-indigo-600">
+            {manualVisibilityPercent === null ? "Auto" : "Manual"} · {Math.round(manualVisibilityPercent ?? autoVisibilityPercent)}%
+          </span>
+        </div>
+        <input
+          type="range"
+          min={10}
+          max={100}
+          step={5}
           disabled={isSearching}
-          value={manualVisibilityLevel ?? "auto"}
-          onChange={e => {
-            const v = e.target.value;
-            onVisibilityLevelChange(v === "auto" ? null : Number(v));
-          }}
-          className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-700 bg-white"
-        >
-          <option value="auto">Auto (Level {autoVisibilityLevel})</option>
-          {[1, 2, 3, 4, 5, 6].map(n => (
-            <option key={n} value={n}>Level {n}{n === 1 ? " — fewest" : n === 6 ? " — all" : ""}</option>
-          ))}
-        </select>
+          value={manualVisibilityPercent ?? autoVisibilityPercent}
+          onChange={event => onVisibilityPercentChange(Number(event.target.value))}
+          aria-label="Timeline visibility percentage"
+          className="w-full accent-indigo-600 disabled:opacity-50"
+        />
+        <div className="flex justify-between text-[10px] text-gray-400 -mt-0.5">
+          <span>10%</span>
+          <span>100% · all records</span>
+        </div>
+        <p className="mt-1.5 text-xs text-gray-400 leading-relaxed">
+          Percentage of filtered records shown. Auto follows the timeline zoom.
+        </p>
         {isSearching && <p className="mt-1 text-xs text-gray-400">All matching policies are shown while searching.</p>}
-        {manualVisibilityLevel !== null && !isSearching && (
+        {manualVisibilityPercent !== null && !isSearching && (
           <button
-            onClick={() => onVisibilityLevelChange(null)}
+            onClick={() => onVisibilityPercentChange(null)}
             className="mt-1.5 text-xs text-blue-500 hover:underline"
           >
             Reset to auto
