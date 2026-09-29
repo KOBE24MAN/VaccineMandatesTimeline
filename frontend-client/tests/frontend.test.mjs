@@ -14,7 +14,7 @@ after(async () => { globalThis.fetch = nativeFetch; await server.close(); });
 
 const store = await server.ssrLoadModule("/src/data/store.ts");
 const { parseMandates, parseNotableEvents, searchDataset, filterMandates } = await server.ssrLoadModule("/src/data/dataset.ts");
-const { mapToIndex, mapToDetail, mandateDateIssueReason, isMandateDisplayable } = await server.ssrLoadModule("/src/hooks/useEvents.ts");
+const { mapToIndex, mapToDetail, isMandateDisplayable } = await server.ssrLoadModule("/src/hooks/useEvents.ts");
 const { timelineGroupKey, visualEndDate, hasOngoingSegment } = await server.ssrLoadModule("/src/utils/timeline.ts");
 
 test("root tab-delimited mandate CSV loads all 186 records across three jurisdictions", async () => {
@@ -34,7 +34,7 @@ test("missing levels use original duration rules and show progressively more rec
   const records = await store.loadMandates();
   const byId = new Map(records.map(row => [row.id, row]));
   const boosterIds = new Set(records.map(row => row.booster_id).filter(Boolean));
-  const events = records.filter(row => !boosterIds.has(row.id)).map(row => mapToIndex(row, byId));
+  const events = records.filter(row => !boosterIds.has(row.id) && isMandateDisplayable(row)).map(row => mapToIndex(row, byId));
   const counts = [1, 2, 3, 4, 5, 6].map(level => events.filter(row => row.visibility_level <= level).length);
   assert.ok(counts[0] > 0);
   assert.ok(counts[2] > counts[0]);
@@ -43,18 +43,24 @@ test("missing levels use original duration rules and show progressively more rec
   assert.equal(records.find(row => row.id === "1").visibility_level, 2);
 });
 
-test("records with only a removal date stay visible as point bars", async () => {
+test("records with empty or negative duration are excluded from the timeline", async () => {
   const records = await store.loadMandates();
-  const byId = new Map(records.map(row => [row.id, row]));
-  const boosterIds = new Set(records.map(row => row.booster_id).filter(Boolean));
-  const timelineRecords = records.filter(row => !boosterIds.has(row.id) && isMandateDisplayable(row));
-  const record = byId.get("104");
-  assert.equal(timelineRecords.length, 168);
-  assert.match(mandateDateIssueReason(record), /Missing effective or enforcement date/);
-  assert.equal(isMandateDisplayable(record), true);
-  const event = mapToIndex(record, byId);
-  assert.equal(event.start_date, record.removal_date);
-  assert.equal(event.end_date, record.removal_date);
+  assert.ok(records.some(record => record.duration_days === null));
+  assert.ok(records.filter(record => record.duration_days === null).every(record => !isMandateDisplayable(record)));
+  const valid = records.find(record => record.duration_days !== null && record.duration_days >= 0);
+  assert.ok(valid);
+  assert.equal(isMandateDisplayable(valid), true);
+  assert.equal(isMandateDisplayable({ ...valid, duration_days: null }), false);
+  assert.equal(isMandateDisplayable({ ...valid, duration_days: -1 }), false);
+  assert.equal(isMandateDisplayable({ ...valid, duration_days: 0 }), true);
+  assert.equal(isMandateDisplayable({
+    ...valid,
+    effective_date: "2022-09-17",
+    enforcement_date: "2023-01-01",
+    removal_date: "2022-10-12",
+    duration_days: 25,
+  }), false);
+  assert.equal(isMandateDisplayable({ ...valid, removal_date: "not-a-date" }), false);
 });
 
 const header = "id,jurisdiction,name,type,target,effective_date,enforcement_date,removal_date,duration_days,visibility_level,ongoing";
@@ -65,8 +71,12 @@ test("CSV level overrides, thresholds, missing duration, and invalid levels", ()
   }
   const [override] = parseMandates(`${header}\n1,WA,Test,Employment,Test,2021-01-01,2021-01-01,2022-01-01,365,5,`);
   assert.equal(override.visibility_level, 5);
-  const [calculated] = parseMandates(`${header}\n1,WA,Test,Employment,Test,2021-01-01,2021-01-01,2022-01-01,,,`);
-  assert.equal(calculated.visibility_level, 1);
+  const [missingDuration] = parseMandates(`${header}\n1,WA,Test,Employment,Test,2021-01-01,2021-01-01,2022-01-01,,,`);
+  assert.equal(missingDuration.duration_days, null);
+  assert.equal(missingDuration.visibility_level, 6);
+  assert.equal(isMandateDisplayable(missingDuration), false);
+  const [negativeDuration] = parseMandates(`${header}\n1,WA,Test,Employment,Test,2021-01-01,2021-01-01,2022-01-01,-1,,`);
+  assert.equal(isMandateDisplayable(negativeDuration), false);
   for (const value of [0, 7, 2.5, "oops"]) assert.throws(() => parseMandates(`${header}\n1,WA,Test,Employment,Test,2021-01-01,2021-01-01,2022-01-01,,${value},`), /visibility_level/);
 });
 
@@ -160,6 +170,31 @@ test("name and target fuzzy filters stay field-specific, combine with AND, and c
   for (const id of ["37", "38", "43", "46", "48", "52"]) assert.ok(fuzzy.some(row => row.id === id), `booster ${id} included`);
   const mixed = [{...base, id:"1", name:"Vaccination"}, {...base, id:"2", name:"Vaccinaton"}];
   assert.equal(filterMandates(mixed, {name:"Vaccination"}).length, 2);
+});
+
+test("both fuzzy searches respect jurisdiction and type selections, including boosters", async () => {
+  const [base] = await store.loadMandates();
+  const policy = { ...base, name: "School Vaccination", target: "Airport drivers", jurisdiction: "WA", type: "Employment" };
+  const rows = [
+    { ...policy, id: "WA-EMP" },
+    { ...policy, id: "NSW-EMP", jurisdiction: "NSW" },
+    { ...policy, id: "WA-PUBLIC", type: "Public Space" },
+    { ...policy, id: "WA-TRAVEL", type: "Travel" },
+    { ...policy, id: "WA-MULTI", type: "Employment, Travel" },
+    { ...policy, id: "WA-BOOSTER", name: "(BOOSTER) School Vaccination" },
+  ];
+  const scope = { jurisdictions: new Set(["WA"]), types: new Set(["Employment"]) };
+  const ids = filters => filterMandates(rows, filters).map(row => row.id);
+  for (const query of [{ name: "school" }, { target: "drivrs" }, { name: "school", target: "drivrs" }]) {
+    assert.deepEqual(ids({ ...scope, ...query }), ["WA-EMP", "WA-MULTI", "WA-BOOSTER"]);
+  }
+  assert.deepEqual(ids({ ...scope, name: "school", target: "teachers" }), []);
+  assert.deepEqual(ids({ ...scope, name: "school", jurisdictions: new Set(["NSW"]) }), ["NSW-EMP"]);
+  assert.deepEqual(ids({ ...scope, name: "school", types: new Set(["Public Space", "Travel"]) }),
+    ["WA-PUBLIC", "WA-TRAVEL", "WA-MULTI"]);
+  assert.deepEqual(ids({ ...scope, name: "school", jurisdictions: new Set() }), []);
+  assert.deepEqual(ids({ ...scope, target: "drivers", types: new Set() }), []);
+  assert.deepEqual(ids({ ...scope, name: "", target: "" }), ["WA-EMP", "WA-MULTI", "WA-BOOSTER"]);
 });
 
 test("matching booster policies are visible and shared overlays avoid duplicate rows", async () => {

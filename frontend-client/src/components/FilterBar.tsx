@@ -139,7 +139,7 @@ export function FilterBar({
         </div>
       </div>
 
-      <fieldset disabled={isSearching} className="flex flex-col gap-5 disabled:opacity-50">
+      <fieldset className="flex flex-col gap-5">
       {/* Jurisdiction */}
       <div>
         <div className="flex items-center justify-between mb-2">
@@ -193,7 +193,7 @@ export function FilterBar({
 
       </fieldset>
 
-      {/* Full-dataset, field-specific fuzzy search */}
+      {/* Field-specific fuzzy search within the selected jurisdiction/type scope */}
       <div>
         <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Search policies</p>
         <div className="flex flex-col gap-3">
@@ -211,7 +211,7 @@ export function FilterBar({
             </div>
           ))}
         </div>
-        <p className="mt-2 text-xs text-gray-400 leading-relaxed">Search all policies, including boosters. Both fields must match when used together.</p>
+        <p className="mt-2 text-xs text-gray-400 leading-relaxed">Search policies in the selected jurisdictions and mandate types, including boosters. Both fields must match when used together.</p>
         {isSearching && (
           <div className="mt-2">
             <p role="status" className="text-xs text-gray-500 mb-1.5">{searchResults.length} matching {searchResults.length === 1 ? "record" : "records"}</p>

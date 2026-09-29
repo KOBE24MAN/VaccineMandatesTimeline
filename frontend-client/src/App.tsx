@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
-import { useEvents } from "./hooks/useEvents";
+import { isMandateDisplayable, useEvents } from "./hooks/useEvents";
 import { useFilters } from "./hooks/useFilters";
 import { useNotableEvents } from "./hooks/useNotableEvents";
 import { FilterBar } from "./components/FilterBar";
@@ -38,7 +38,7 @@ function continuousVisibilityPercent(windowDays: number): number {
 }
 
 export default function App() {
-  const { events, allRecords, dateIssueRecords, totalRecords, loading, error, fetchDetail } = useEvents();
+  const { events, allRecords, totalRecords, loading, error, fetchDetail } = useEvents();
   const notableEvents = useNotableEvents();
   const [activeNotableEventIds, setActiveNotableEventIds] = useState<Set<number>>(new Set());
   const {
@@ -57,8 +57,18 @@ export default function App() {
   const [nameQuery, setNameQuery] = useState("");
   const [targetQuery, setTargetQuery] = useState("");
   const isSearching = Boolean(nameQuery.trim() || targetQuery.trim());
-  const searchResults = useMemo(() => filterMandates(allRecords, { name: nameQuery, target: targetQuery }),
-    [allRecords, nameQuery, targetQuery]);
+  const filteredRecords = useMemo(() => filterMandates(allRecords, {
+    name: nameQuery, target: targetQuery, jurisdictions: activeRegions, types: activeTypes,
+  }), [allRecords, nameQuery, targetQuery, activeRegions, activeTypes]);
+  const searchResults = useMemo(
+    () => filteredRecords.filter(isMandateDisplayable),
+    [filteredRecords],
+  );
+  const filteredInvalidCount = useMemo(
+    () => filteredRecords.length - searchResults.length,
+    [filteredRecords, searchResults],
+  );
+  const filteredDisplayableCount = searchResults.length;
   const searchEvents = useMemo(() => searchTimelineEvents(searchResults, allRecords), [searchResults, allRecords]);
   const timelineRegions = useMemo(() => isSearching
     ? new Set(searchEvents.map(event => event.region)) : activeRegions, [isSearching, searchEvents, activeRegions]);
@@ -201,17 +211,20 @@ export default function App() {
   const currentWindow = useRef({ start: windowStart, end: windowEnd });
   currentWindow.current = { start: windowStart, end: windowEnd };
   useEffect(() => {
-    setSelectedEventId(null);
-    setGroupedEventIds(null);
-    setReturnGroupIds(null);
     if (!isSearching) {
       if (preSearchWindow.current) {
+        setSelectedEventId(null);
+        setGroupedEventIds(null);
+        setReturnGroupIds(null);
         setWindowStart(preSearchWindow.current.start);
         setWindowEnd(preSearchWindow.current.end);
         preSearchWindow.current = null;
       }
       return;
     }
+    setSelectedEventId(null);
+    setGroupedEventIds(null);
+    setReturnGroupIds(null);
     if (introFrame.current !== null) { cancelAnimationFrame(introFrame.current); introFrame.current = null; }
     preSearchWindow.current ??= currentWindow.current;
     const dates = searchEvents.flatMap(event => [visualStartDate(event), visualEndDate(event)])
@@ -323,12 +336,21 @@ export default function App() {
             ?
           </button>
         </div>
-        <span className="text-xs text-gray-400">
-          {isSearching ? <><span className="font-semibold text-gray-600">{searchResults.length}</span> matching records</> : <>
-            Showing <span className="font-semibold text-gray-600">{visibleEvents.length}</span> of{" "}
-            <span className="font-semibold text-gray-600">{events.length}</span> dated mandates
-          </>} · <span className="font-semibold text-gray-600">{totalRecords}</span> records total
-        </span>
+        <div className="flex flex-col items-end text-xs text-gray-400">
+          <span>
+            {isSearching ? <><span className="font-semibold text-gray-600">{searchResults.length}</span> matching records</> : <>
+              Showing <span className="font-semibold text-gray-600">{visibleEvents.length}</span> of{" "}
+              <span className="font-semibold text-gray-600">{events.length}</span> dated mandates
+            </>} · <span className="font-semibold text-gray-600">{totalRecords}</span> records total
+          </span>
+          <span className={filteredInvalidCount > 0 ? "mt-0.5 text-amber-600" : "mt-0.5"}>
+            Current filters: <span className="font-semibold">{filteredDisplayableCount}</span> displayable of{" "}
+            <span className="font-semibold">{filteredRecords.length}</span> records
+            {filteredInvalidCount > 0 && <>
+              {" "}· <span className="font-semibold">{filteredInvalidCount}</span> not displayed due to invalid duration or date order
+            </>}
+          </span>
+        </div>
       </header>
 
       {/* Body */}
@@ -468,9 +490,6 @@ export default function App() {
                 onClose={() => { setSelectedEventId(null); setGroupedEventIds(null); setReturnGroupIds(null); }}
                 onSelectFromGroup={handleSelectFromGroup}
                 onBackToGroup={returnGroupIds ? handleBackToGroup : undefined}
-                dateNotice={{
-                  hiddenRecords: dateIssueRecords,
-                }}
               />
             </div>
           </motion.aside>
@@ -522,7 +541,7 @@ export default function App() {
             <div className="mt-4">
               <h3 className="text-sm font-bold text-gray-800 mb-1.5">How to use</h3>
               <p className="text-sm text-gray-600 leading-relaxed">
-                Scroll up over the timeline to zoom in and scroll down to zoom out; when a mandate is selected, zooming stays centred on it. Hold the middle mouse button and drag left or right to pan the timeline directly, or use the minimap at the bottom. Click any mandate bar to open its detail panel on the right. The filter bar lets you narrow by jurisdiction and mandate type. Double-click a bar to isolate that jurisdiction. Search by Name or Target to find matching policies across the full dataset, including boosters. Both search fields support partial words and small spelling errors; when both are filled, a record must match both. Clear both fields to restore your previous view.
+                Scroll up over the timeline to zoom in and scroll down to zoom out; when a mandate is selected, zooming stays centred on it. Hold the middle mouse button and drag left or right to pan the timeline directly, or use the minimap at the bottom. Click any mandate bar to open its detail panel on the right. The filter bar lets you narrow by jurisdiction and mandate type. Double-click a bar to isolate that jurisdiction. Search by Name or Target to find matching policies within the selected jurisdictions and mandate types, including boosters. Both search fields support partial words and small spelling errors; when both are filled, a record must match both. You can change the filters while searching. Clear both fields to restore your previous timeline window with the current filters.
               </p>
             </div>
 

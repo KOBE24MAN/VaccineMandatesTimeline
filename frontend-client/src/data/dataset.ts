@@ -49,6 +49,8 @@ export interface SearchResult {
 export interface MandateFilters {
   name?: string;
   target?: string;
+  jurisdictions?: ReadonlySet<string>;
+  types?: ReadonlySet<string>;
 }
 
 const textFields = [
@@ -117,11 +119,9 @@ export function parseMandates(csv: string): Mandate[] {
     if (level !== null && (!Number.isInteger(level) || level < 1 || level > 6)) {
       throw new Error(`Invalid visibility_level for ${id}: expected 1–6.`);
     }
-    const start = text.effective_date ?? text.enforcement_date;
-    const calculatedDays = start && text.removal_date
-      ? (Date.parse(text.removal_date) - Date.parse(start)) / 86_400_000 : null;
-    const duration = integer(row.duration_days, `${id}: duration_days`) ??
-      (calculatedDays !== null && Number.isFinite(calculatedDays) ? calculatedDays : null);
+    // Keep an empty duration empty. Timeline rendering uses this field as the
+    // data-quality gate instead of silently deriving a replacement value.
+    const duration = integer(row.duration_days, `${id}: duration_days`);
     mandates.push({
       ...text, id, jurisdiction,
       duration_days: duration,
@@ -154,14 +154,16 @@ export function parseNotableEvents(csv: string): Omit<NotableEvent, "display_dat
   }).sort((a, b) => compare(a.event_date, b.event_date) || a.id - b.id);
 }
 
-/** Match each query only against its named field, including booster records. */
+/** Search the selected jurisdiction/type scope, including its booster records. */
 export function filterMandates(
   mandates: readonly Mandate[],
-  { name = "", target = "" }: MandateFilters,
+  { name = "", target = "", jurisdictions, types }: MandateFilters,
 ): Mandate[] {
   const nameQuery = name.trim();
   const targetQuery = target.trim();
   return mandates.filter(mandate =>
+    (!jurisdictions || jurisdictions.has(mandate.jurisdiction)) &&
+    (!types || (mandate.type ?? "Employment").split(",").some(type => types.has(type.trim()))) &&
     (!nameQuery || Number.isFinite(nameMatchScore(mandate.name ?? "", nameQuery))) &&
     (!targetQuery || Number.isFinite(nameMatchScore(mandate.target ?? "", targetQuery))),
   );

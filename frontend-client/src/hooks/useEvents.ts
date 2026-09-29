@@ -3,15 +3,9 @@ import type { EventIndex, EventDetail, Region, EventType } from "../types/event"
 import { loadMandates, loadMandate } from "../data/store";
 import type { Mandate } from "../data/dataset";
 
-export interface DateIssueRecord {
-  record: Mandate;
-  reason: string;
-}
-
 interface UseEventsReturn {
   events: EventIndex[];
   allRecords: Mandate[];
-  dateIssueRecords: DateIssueRecord[];
   totalRecords: number;
   loading: boolean;
   error: string | null;
@@ -24,23 +18,21 @@ function validDate(value: string | null | undefined): number | null {
   return Number.isFinite(time) ? time : null;
 }
 
-export function mandateDateIssueReason(m: Mandate): string | null {
-  const startDate = m.effective_date ?? m.enforcement_date;
-  const start = validDate(startDate);
-  const removal = validDate(m.removal_date);
-
-  if (!startDate) return "Missing effective or enforcement date";
-  if (start === null) return "Invalid effective or enforcement date";
-  if (m.removal_date && removal === null) return "Invalid removal date";
-  if (m.duration_days === null) return "Duration days is empty";
-  if (m.duration_days < 0) return "Duration days is negative";
-  if (removal !== null && removal < start) return "Removal date is before effective/enforcement date";
-  return null;
-}
-
 export function isMandateDisplayable(m: Mandate): boolean {
-  return [m.effective_date, m.enforcement_date, m.announcement_date, m.removal_date]
-    .some(value => validDate(value) !== null);
+  if (m.duration_days === null || !Number.isFinite(m.duration_days) || m.duration_days < 0) {
+    return false;
+  }
+
+  const dateValues = [m.announcement_date, m.effective_date, m.enforcement_date, m.removal_date];
+  if (dateValues.some(value => value && validDate(value) === null)) return false;
+
+  const effective = validDate(m.effective_date);
+  const enforcement = validDate(m.enforcement_date);
+  const removal = validDate(m.removal_date);
+  if (removal !== null && effective !== null && removal < effective) return false;
+  if (removal !== null && enforcement !== null && removal < enforcement) return false;
+
+  return dateValues.some(value => validDate(value) !== null);
 }
 
 export function mapToIndex(m: Mandate, mandatesById: Map<string, Mandate>): EventIndex {
@@ -59,7 +51,6 @@ export function mapToIndex(m: Mandate, mandatesById: Map<string, Mandate>): Even
   return {
     id: m.id,
     title: m.name ?? m.id,
-    // Records with only a removal date remain visible as a minimum-width point bar.
     start_date: m.effective_date ?? m.enforcement_date ?? m.announcement_date ?? m.removal_date ?? "",
     effective_date: m.effective_date,
     end_date: m.removal_date ?? null,
@@ -112,7 +103,6 @@ export function mapToDetail(m: Mandate, mandatesById: Map<string, Mandate>): Eve
 export function useEvents(): UseEventsReturn {
   const [events, setEvents] = useState<EventIndex[]>([]);
   const [allRecords, setAllRecords] = useState<Mandate[]>([]);
-  const [dateIssueRecords, setDateIssueRecords] = useState<DateIssueRecord[]>([]);
   const [totalRecords, setTotalRecords] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -126,10 +116,6 @@ export function useEvents(): UseEventsReturn {
           const mandatesById = new Map(mandates.map(m => [m.id, m]));
           const boosterIds = new Set(mandates.map(m => m.booster_id).filter(Boolean));
           setAllRecords(mandates);
-          setDateIssueRecords(mandates.flatMap(record => {
-            const reason = mandateDateIssueReason(record);
-            return reason ? [{ record, reason }] : [];
-          }));
           setEvents(mandates
             .filter(m => !boosterIds.has(m.id))
             .filter(isMandateDisplayable)
@@ -157,5 +143,5 @@ export function useEvents(): UseEventsReturn {
     return mapToDetail(data, mandatesById);
   }, []);
 
-  return { events, allRecords, dateIssueRecords, totalRecords, loading, error, fetchDetail };
+  return { events, allRecords, totalRecords, loading, error, fetchDetail };
 }

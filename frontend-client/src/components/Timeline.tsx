@@ -1025,9 +1025,6 @@ export function Timeline({ events, activeRegions, onEventClick, onEventDoubleCli
     <div
       ref={containerRef}
       className={`flex-1 overflow-hidden relative bg-white ${isMiddlePanning ? "cursor-grabbing" : ""}`}
-      title={selectedEventId
-        ? "Scroll to zoom around the selected mandate; middle-drag to pan"
-        : "Scroll to zoom; middle-drag to pan"}
     >
       <svg ref={svgRef} style={{ width: dims.width, height: dims.height }} />
 
